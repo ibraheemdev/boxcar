@@ -1,3 +1,4 @@
+// adapted from: https://github.com/hawkw/sharded-slab/blob/main/benches/bench.rs
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::{
     sync::{Arc, Barrier, RwLock},

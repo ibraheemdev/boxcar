@@ -77,7 +77,7 @@ fn main() {
 
 # Details
 
-A vector is represented as an array of lazily allocated buckets, sizes 1, 1, 2, 4 .. 2^63:
+A vector is represented as an array of lazily allocated buckets, sizes `1, 1, 2, 4 .. 2^63`:
 
 ```text
 ______________________________________
@@ -103,7 +103,7 @@ An entry holds a slot for a value along with a flag indicating whether the slot 
 _____________________
 | ACTIVE | INACTIVE |
 |   42   |   NULL   |
---------------------
+---------------------
 ```
 
 Writes to the vector acquire a unique entry index. The bucket holding the entry is calculated using the leading zeros instruction. If the bucket is already initialized, the value is simply written to the slot, and the slot is marked as active. If the bucket has not been initialized, the thread acquires the initialization lock, allocates the bucket, and then writes the value. Note that in the general case, writes are lock-free.
@@ -112,7 +112,7 @@ Reads use the same calculation to find the slot mapped to the given index, readi
 
 # Performance
 
-Below is a benchmark where an increasing number of elements are pushed and read from the vector, comparing `boxcar::Vec` to a `RwLock<Vec>`:
+Below is a benchmark in which an increasing number of elements are pushed and read from the vector by 12 threads, comparing `boxcar::Vec` to a `RwLock<Vec>`:
 
 <img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077026-af9b90c6-f9e7-47ab-9eb0-0c89a1302fa7.png">
 
