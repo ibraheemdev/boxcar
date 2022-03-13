@@ -77,7 +77,7 @@ fn main() {
 
 # Details
 
-A vector is represented as an array of lazily allocated buckets, sizes `1, 1, 2, 4 .. 2^63`:
+A concurrent vector is represented as an array of lazily allocated buckets, of sizes `1, 1, 2, 4 .. 2^63`:
 
 ```text
 ______________________________________
@@ -86,7 +86,7 @@ ______________________________________
 --------------------------------------
 ```
 
-A buckets holds a number entries, as well as a lock used for initialization:
+A buckets holds a number entries, as well as a lock to guard againt concurrent initialization:
 
 ```text
 _____________
@@ -106,14 +106,21 @@ _____________________
 ---------------------
 ```
 
-Writes acquire a unique index into the vector. The bucket holding the given entry is calculated using the leading zeros instruction. If the bucket is already initialized, the value is written to the slot, and the slot is marked as active. If the bucket has not been initialized, the thread acquires the initialization lock, allocates the bucket, and then writes the value. Note that in the general case, writes are lock-free.
+Writes acquire a unique index into the vector. The bucket holding the given entry is calculated
+using the leading zeros instruction. If the bucket is already initialized, the value is written
+to the slot, and the slot is marked as active. If the bucket has not been initialized, the thread
+acquires the initialization lock, allocates the bucket, and then writes the value. Note that in
+the general case, writes are lock-free.
 
-Reads use the same calculation to find the entry mapped to the given index, reading the value from the slot if the flag indicates the slot is active. All reads are guaranteed to be lock-free.
+Reads use the same calculation to find the entry mapped to the given index, reading the value from
+the slot if the flag indicates the slot is active. All reads are guaranteed to be lock-free.
 
 # Performance
 
-Below is a benchmark in which an increasing number of elements are pushed and read from the vector by 12 threads, comparing `boxcar::Vec` to `RwLock<Vec>`:
+Below is a benchmark in which an increasing number of elements are pushed and read from the vector
+by 12 threads, comparing `boxcar::Vec` to `RwLock<Vec>`:
 
 <img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077862-a2a58be5-cbf0-4a2f-bbc2-202a026678c2.png">
 
-The results show that `boxcar::Vec` scales very well under load, performing significantly better than lock-based solutions.
+The results show that `boxcar::Vec` scales very well under load, performing significantly better
+than lock-based solutions.
