@@ -277,8 +277,8 @@ impl Iter {
             .map(|entry| unsafe { entry.value_unchecked() })
     }
 
-    pub unsafe fn next_owned<'v, T>(&mut self, vec: &'v mut Vec<T>) -> Option<T> {
-        self.next(&vec).map(|entry| unsafe {
+    pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
+        self.next(vec).map(|entry| unsafe {
             entry.active.store(false, Ordering::Relaxed);
             // SAFETY: RawIter only yields initialized entries
             mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit()).assume_init()
