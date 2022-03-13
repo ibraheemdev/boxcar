@@ -3,7 +3,7 @@ use std::mem::{self, MaybeUninit};
 use std::ops::Index;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use std::sync::Mutex;
-use std::{iter, ptr, slice};
+use std::{ptr, slice};
 
 const BUCKETS: usize = (usize::BITS + 1) as _;
 const MAX_ENTRIES: usize = usize::MAX;
@@ -11,7 +11,7 @@ const MAX_ENTRIES: usize = usize::MAX;
 // A lock-free, append-only vector.
 pub struct Vec<T> {
     // buckets of length 1, 1, 2, 4, 8 .. 2^63
-    buckets: Box<[Bucket<T>; BUCKETS]>,
+    buckets: [Bucket<T>; BUCKETS],
     // the number of elements in this vector
     len: AtomicUsize,
     // a counter used to retrieve a unique index
@@ -33,18 +33,15 @@ impl<T> Vec<T> {
             n => Location::of(n).bucket,
         };
 
-        let mut buckets = iter::repeat_with(|| Bucket::from_raw(ptr::null_mut()))
-            .take(BUCKETS)
-            .collect::<Box<[_]>>();
+        let mut buckets = [ptr::null_mut(); BUCKETS];
 
         for (i, bucket) in buckets[..=init].iter_mut().enumerate() {
             let len = Location::bucket_len(i);
-            dbg!(len);
-            *bucket = Bucket::from_raw(Bucket::alloc(len));
+            *bucket = Bucket::alloc(len);
         }
 
         Vec {
-            buckets: buckets.try_into().unwrap_or_else(|_| unreachable!()),
+            buckets: buckets.map(Bucket::from_raw),
             inflight: AtomicUsize::new(0),
             len: AtomicUsize::new(0),
         }
