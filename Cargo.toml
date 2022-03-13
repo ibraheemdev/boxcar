@@ -1,13 +1,23 @@
 [package]
 name = "boxcar"
 version = "0.1.0"
+authors = ["Ibraheem Ahmed <ibraheem@ibraheem.ca>"]
 edition = "2021"
+license = "MIT"
+
+readme = "README.md"
+description = "A concurrent, append-only vector"
+repository = "https://github.com/ibraheemdev/boxcar"
+
+keywords = ["concurrent","vector","lock-free"]
+categories = ["concurrency", "data-structures"]
 
 [[bench]]
 name = "bench"
 harness = false
 
 [dependencies]
+# ...
 
 [dev-dependencies]
 criterion = "0.3.5"
