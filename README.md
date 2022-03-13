@@ -114,6 +114,6 @@ Reads use the same calculation to find the slot mapped to the given index, readi
 
 Below is a benchmark where an increasing number of elements are pushed and read from the vector, comparing `boxcar::Vec` to a `RwLock<Vec>`:
 
-![](./report.svg)
+<img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077026-af9b90c6-f9e7-47ab-9eb0-0c89a1302fa7.png">
 
 The results show that `boxcar::Vec` scales very well under load, performing significantly better than lock-based solutions.
