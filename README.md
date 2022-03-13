@@ -2,7 +2,7 @@
 
 [![Crate](https://img.shields.io/crates/v/boxcar?style=for-the-badge)](https://crates.io/crates/boxcar)
 [![Github](https://img.shields.io/badge/github-boxcar-success?style=for-the-badge)](https://github.com/ibraheemdev/boxcar)
-[![Docs](https://img.shields.io/badge/docs.rs-0.0.1-4d76ae?style=for-the-badge)](https://docs.rs/boxcar)
+[![Docs](https://img.shields.io/badge/docs.rs-0.1.0-4d76ae?style=for-the-badge)](https://docs.rs/boxcar)
 
 A concurrent, append-only vector.
 
@@ -106,13 +106,13 @@ _____________________
 ---------------------
 ```
 
-Writes to the vector acquire a unique entry index. The bucket holding the entry is calculated using the leading zeros instruction. If the bucket is already initialized, the value is simply written to the slot, and the slot is marked as active. If the bucket has not been initialized, the thread acquires the initialization lock, allocates the bucket, and then writes the value. Note that in the general case, writes are lock-free.
+Writes acquire a unique index into the vector. The bucket holding the given entry is calculated using the leading zeros instruction. If the bucket is already initialized, the value is written to the slot, and the slot is marked as active. If the bucket has not been initialized, the thread acquires the initialization lock, allocates the bucket, and then writes the value. Note that in the general case, writes are lock-free.
 
-Reads use the same calculation to find the slot mapped to the given index, reading the value from the slot if the flag indicates the slot is active. All reads are guaranteed to be lock-free.
+Reads use the same calculation to find the entry mapped to the given index, reading the value from the slot if the flag indicates the slot is active. All reads are guaranteed to be lock-free.
 
 # Performance
 
-Below is a benchmark in which an increasing number of elements are pushed and read from the vector by 12 threads, comparing `boxcar::Vec` to a `RwLock<Vec>`:
+Below is a benchmark in which an increasing number of elements are pushed and read from the vector by 12 threads, comparing `boxcar::Vec` to `RwLock<Vec>`:
 
 <img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077026-af9b90c6-f9e7-47ab-9eb0-0c89a1302fa7.png">
 
