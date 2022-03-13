@@ -14,17 +14,17 @@ use std::ops::Index;
 /// - Create a [`Vec`] containing a given list of elements:
 ///
 /// ```
-/// let v = vec![1, 2, 3];
-/// assert_eq!(v[0], 1);
-/// assert_eq!(v[1], 2);
-/// assert_eq!(v[2], 3);
+/// let vec = vec![1, 2, 3];
+/// assert_eq!(vec[0], 1);
+/// assert_eq!(vec[1], 2);
+/// assert_eq!(vec[2], 3);
 /// ```
 ///
 /// - Create a [`Vec`] from a given element and size:
 ///
 /// ```
-/// let v = vec![1; 3];
-/// assert_eq!(v, [1, 1, 1]);
+/// let vec = vec![1; 3];
+/// assert_eq!(vec, [1, 1, 1]);
 /// ```
 #[macro_export]
 macro_rules! vec {
@@ -44,6 +44,12 @@ macro_rules! vec {
 /// A concurrent, append-only vector.
 ///
 /// See [the crate documentation](crate) for details.
+///
+/// # Notes
+///
+/// The bucket array is stored inline, meaning that the
+/// a `Vec<T>` is quite large. It is expected that you
+/// store it behind an [`Arc`](std::sync::Arc) or similar.
 pub struct Vec<T> {
     raw: raw::Vec<T>,
 }
@@ -60,8 +66,7 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// # #![allow(unused_mut)]
-    /// let mut vec: boxcar::Vec<i32> = boxcar::Vec::new();
+    /// let vec: boxcar::Vec<i32> = boxcar::Vec::new();
     /// ```
     pub fn new() -> Vec<T> {
         Vec::with_capacity(0)
@@ -75,7 +80,7 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let mut vec = boxcar::Vec::with_capacity(10);
+    /// let vec = boxcar::Vec::with_capacity(10);
     ///
     /// for i in 0..10 {
     ///     // will not allocate
@@ -100,7 +105,7 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let mut vec = boxcar::Vec::new();
+    /// let vec = boxcar::Vec::new();
     /// vec.reserve(10);
     ///
     /// for i in 0..10 {
@@ -121,7 +126,7 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let mut vec = boxcar::vec![1, 2];
+    /// let vec = boxcar::vec![1, 2];
     /// assert_eq!(vec.push(3), 2);
     /// assert_eq!(vec, [1, 2, 3]);
     /// ```
@@ -134,11 +139,11 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let mut a = boxcar::Vec::new();
-    /// assert_eq!(a.len(), 0);
-    /// a.push(1);
-    /// a.push(2);
-    /// assert_eq!(a.len(), 2);
+    /// let vec = boxcar::Vec::new();
+    /// assert_eq!(vec.len(), 0);
+    /// vec.push(1);
+    /// vec.push(2);
+    /// assert_eq!(vec.len(), 2);
     /// ```
     #[inline]
     pub fn len(&self) -> usize {
@@ -150,47 +155,15 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let mut v = boxcar::Vec::new();
-    /// assert!(v.is_empty());
+    /// let vec = boxcar::Vec::new();
+    /// assert!(vec.is_empty());
     ///
-    /// v.push(1);
-    /// assert!(!v.is_empty());
+    /// vec.push(1);
+    /// assert!(!vec.is_empty());
     /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
-    }
-
-    /// Returns the first element of the slice, or `None` if it is empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = boxcar::vec![10, 40, 30];
-    /// assert_eq!(Some(&10), v.first());
-    ///
-    /// let w: boxcar::Vec<i32> = boxcar::Vec::new();
-    /// assert_eq!(None, w.first());
-    /// ```
-    #[inline]
-    pub fn first(&self) -> Option<&T> {
-        self.get(0)
-    }
-
-    /// Returns the last element of the slice, or `None` if it is empty.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// let v = boxcar::vec![10, 40, 30];
-    /// assert_eq!(Some(&30), v.last());
-    ///
-    /// let w: boxcar::Vec<i32> = boxcar::Vec::new();
-    /// assert_eq!(None, w.last());
-    /// ```
-    #[inline]
-    pub fn last(&self) -> Option<&T> {
-        self.get(self.len().saturating_sub(1))
     }
 
     /// Returns a reference to the element at the given index.
@@ -198,9 +171,9 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let v = boxcar::vec![10, 40, 30];
-    /// assert_eq!(Some(&40), v.get(1));
-    /// assert_eq!(None, v.get(3));
+    /// let vec = boxcar::vec![10, 40, 30];
+    /// assert_eq!(Some(&40), vec.get(1));
+    /// assert_eq!(None, vec.get(3));
     /// ```
     pub fn get(&self, index: usize) -> Option<&T> {
         self.raw.get(index)
@@ -211,8 +184,8 @@ impl<T> Vec<T> {
     /// # Examples
     ///
     /// ```
-    /// let x = boxcar::vec![1, 2, 4];
-    /// let mut iterator = x.iter();
+    /// let vec = boxcar::vec![1, 2, 4];
+    /// let mut iterator = vec.iter();
     ///
     /// assert_eq!(iterator.next(), Some(&1));
     /// assert_eq!(iterator.next(), Some(&2));
