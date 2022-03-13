@@ -114,6 +114,6 @@ Reads use the same calculation to find the entry mapped to the given index, read
 
 Below is a benchmark in which an increasing number of elements are pushed and read from the vector by 12 threads, comparing `boxcar::Vec` to `RwLock<Vec>`:
 
-<img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077026-af9b90c6-f9e7-47ab-9eb0-0c89a1302fa7.png">
+<img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077862-a2a58be5-cbf0-4a2f-bbc2-202a026678c2.png">
 
 The results show that `boxcar::Vec` scales very well under load, performing significantly better than lock-based solutions.
