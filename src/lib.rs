@@ -179,6 +179,31 @@ impl<T> Vec<T> {
         self.raw.get(index)
     }
 
+    /// Returns a reference to an element, without doing bounds
+    /// checking or verifying that the element is fully initialized.
+    ///
+    /// For a safe alternative see [`get`](Vec::get).
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index, or for an element that
+    /// is being concurrently initialized is **undefined behavior**, even if
+    /// the resulting reference is not used.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec = boxcar::vec![1, 2, 4];
+    ///
+    /// unsafe {
+    ///     assert_eq!(vec.get_unchecked(1), &2);
+    /// }
+    /// ```
+    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+        // SAFETY: guaranteed by caller
+        unsafe { self.raw.get_unchecked(index) }
+    }
+
     /// Returns an iterator over the slice.
     ///
     /// # Examples

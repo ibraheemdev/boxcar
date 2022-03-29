@@ -177,6 +177,28 @@ impl<T> Vec<T> {
         None
     }
 
+    // Returns a reference to the element at the given index.
+    //
+    // # Safety
+    //
+    // Entry at `index` must be initialized.
+    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+        let location = Location::of(index);
+
+        // SAFETY: caller guarantees index is in bounds and
+        // entry is present.
+        unsafe {
+            let entry = self
+                .buckets
+                .get_unchecked(location.bucket)
+                .entries
+                .load(Ordering::Acquire)
+                .add(location.entry);
+
+            (*entry).value_unchecked()
+        }
+    }
+
     // Returns an iterator over the vector.
     pub fn iter(&self) -> Iter {
         Iter {
