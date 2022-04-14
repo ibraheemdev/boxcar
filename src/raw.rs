@@ -29,7 +29,7 @@ impl<T> Vec<T> {
     pub fn with_capacity(capacity: usize) -> Vec<T> {
         let init = match capacity {
             0 => 0,
-            // intialize enough buckets for `capacity` elements
+            // initialize enough buckets for `capacity` elements
             n => Location::of(n).bucket,
         };
 
@@ -130,7 +130,7 @@ impl<T> Vec<T> {
             // a `inflight.fetch_add`.
             //
             // 2. any thread trying to `get` this entry will see
-            // `initialized == false`, and will not try to access it
+            // `active == false`, and will not try to access it
             entry.slot.get().write(MaybeUninit::new(value));
 
             // let other threads know that this slot
