@@ -136,18 +136,21 @@ impl<T> Vec<T> {
 
     /// Returns the number of elements in the vector.
     ///
+    /// Note that due to concurrent writes, it is not guaranteed
+    /// that all elements `0..vec.count()` are initialized.
+    ///
     /// # Examples
     ///
     /// ```
     /// let vec = boxcar::Vec::new();
-    /// assert_eq!(vec.len(), 0);
+    /// assert_eq!(vec.count(), 0);
     /// vec.push(1);
     /// vec.push(2);
-    /// assert_eq!(vec.len(), 2);
+    /// assert_eq!(vec.count(), 2);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
-        self.raw.len()
+    pub fn count(&self) -> usize {
+        self.raw.count()
     }
 
     /// Returns `true` if the vector contains no elements.
@@ -163,7 +166,7 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.count() == 0
     }
 
     /// Returns a reference to the element at the given index.
@@ -291,7 +294,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.vec.len() - self.raw.yielded(), None)
+        (self.vec.count() - self.raw.yielded(), None)
     }
 }
 
@@ -339,7 +342,7 @@ impl<T: fmt::Debug> fmt::Debug for Vec<T> {
 
 impl<T: PartialEq> PartialEq for Vec<T> {
     fn eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
+        if self.count() != other.count() {
             return false;
         }
 
@@ -355,7 +358,7 @@ where
     fn eq(&self, other: &A) -> bool {
         let other = other.as_ref();
 
-        if self.len() != other.len() {
+        if self.count() != other.len() {
             return false;
         }
 

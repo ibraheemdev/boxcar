@@ -13,7 +13,7 @@ pub struct Vec<T> {
     // buckets of length 1, 1, 2, 4, 8 .. 2^63
     buckets: [Bucket<T>; BUCKETS],
     // the number of elements in this vector
-    len: AtomicUsize,
+    count: AtomicUsize,
     // a counter used to retrieve a unique index
     // to push to. this value may be more than
     // the true length as it will be incremented
@@ -43,7 +43,7 @@ impl<T> Vec<T> {
         Vec {
             buckets: buckets.map(Bucket::from_raw),
             inflight: AtomicUsize::new(0),
-            len: AtomicUsize::new(0),
+            count: AtomicUsize::new(0),
         }
     }
 
@@ -51,7 +51,7 @@ impl<T> Vec<T> {
     // in the given `Vec<T>`. The collection may reserve more space to avoid
     // frequent reallocations.
     pub fn reserve(&self, additional: usize) {
-        let len = self.len.load(Ordering::Acquire);
+        let len = self.count.load(Ordering::Acquire);
         let location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRIES));
 
         let mut bucket_index = location.bucket;
@@ -137,14 +137,14 @@ impl<T> Vec<T> {
             entry.active.store(true, Ordering::Release);
         }
 
-        self.len.fetch_add(1, Ordering::Release);
+        self.count.fetch_add(1, Ordering::Release);
 
         location.index
     }
 
     // Returns the number of elements in the vector.
-    pub fn len(&self) -> usize {
-        self.len.load(Ordering::Acquire)
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::Acquire)
     }
 
     // Returns a reference to the element at the given index.
@@ -389,5 +389,19 @@ impl Location {
 
     fn bucket_len(bucket: usize) -> usize {
         1 << bucket.saturating_sub(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn location() {
+        let min = Location::of(0);
+        assert_eq!(min.bucket, 0);
+
+        let max = Location::of(MAX_ENTRIES);
+        assert_eq!(max.bucket, BUCKETS - 1);
     }
 }
