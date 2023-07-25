@@ -182,6 +182,19 @@ impl<T> Vec<T> {
         self.raw.get(index)
     }
 
+    /// Returns a mutable reference to the element at the given index.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = boxcar::vec![10, 40, 30];
+    /// assert_eq!(Some(&mut 40), vec.get_mut(1));
+    /// assert_eq!(None, vec.get_mut(3));
+    /// ```
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.raw.get_mut(index)
+    }
+
     /// Returns a reference to an element, without doing bounds
     /// checking or verifying that the element is fully initialized.
     ///
@@ -205,6 +218,31 @@ impl<T> Vec<T> {
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         // SAFETY: guaranteed by caller
         unsafe { self.raw.get_unchecked(index) }
+    }
+
+
+    /// Returns a mutable reference to an element, without doing bounds
+    /// checking or verifying that the element is fully initialized.
+    ///
+    /// For a safe alternative see [`get`](Vec::get).
+    ///
+    /// # Safety
+    ///
+    /// Calling this method with an out-of-bounds index is **undefined
+    /// behavior**, even if the resulting reference is not used.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = boxcar::vec![1, 2, 4];
+    ///
+    /// unsafe {
+    ///     assert_eq!(vec.get_unchecked_mut(1), &mut 2);
+    /// }
+    /// ```
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        // SAFETY: guaranteed by caller
+        unsafe { self.raw.get_unchecked_mut(index) }
     }
 
     /// Returns an iterator over the vector.

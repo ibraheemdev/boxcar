@@ -195,6 +195,57 @@ impl<T> Vec<T> {
         }
     }
 
+    // Returns a mutable reference to the element at the given index.
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        let location = Location::of(index);
+
+        // SAFETY: we have enough buckets for `usize::MAX` entries
+        let entries = unsafe {
+            self.buckets
+                .get_unchecked_mut(location.bucket)
+                .entries
+                .get_mut()
+        };
+
+        // bucket is uninitialized
+        if entries.is_null() {
+            return None;
+        }
+
+        // SAFETY: `location.entry` is always in bounds for `location.bucket`
+        let entry = unsafe { &mut *entries.add(location.entry) };
+
+        if *entry.active.get_mut() {
+            // SAFETY: the entry is active
+            unsafe { return Some(entry.value_unchecked_mut()) }
+        }
+
+        // entry is uninitialized
+        None
+    }
+
+    // Returns a mutable reference to the element at the given index.
+    //
+    // # Safety
+    //
+    // Entry at `index` must be initialized.
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        let location = Location::of(index);
+
+        // SAFETY: caller guarantees index is in bounds and
+        // entry is present.
+        unsafe {
+            let entry = self
+                .buckets
+                .get_unchecked_mut(location.bucket)
+                .entries
+                .get_mut()
+                .add(location.entry);
+
+            (*entry).value_unchecked_mut()
+        }
+    }
+
     // Returns an iterator over the vector.
     pub fn iter(&self) -> Iter {
         Iter {
@@ -349,6 +400,14 @@ impl<T> Entry<T> {
     unsafe fn value_unchecked(&self) -> &T {
         // SAFETY: guaranteed by caller
         unsafe { (*self.slot.get()).assume_init_ref() }
+    }
+
+    // # Safety
+    //
+    // Value must be initialized.
+    unsafe fn value_unchecked_mut(&mut self) -> &mut T {
+        // SAFETY: guaranteed by caller
+        unsafe { self.slot.get_mut().assume_init_mut() }
     }
 }
 
