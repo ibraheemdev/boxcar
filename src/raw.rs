@@ -237,7 +237,7 @@ pub struct Iter {
 }
 
 impl Iter {
-    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<&'v Entry<T>> {
+    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v Entry<T>)> {
         if self.yielded() == vec.count() {
             return None;
         }
@@ -263,13 +263,14 @@ impl Iter {
                 while self.location.entry < self.location.bucket_len {
                     // SAFETY: bounds checked above
                     let entry = unsafe { &*entries.add(self.location.entry) };
+                    let index = self.location.index;
                     self.location.entry += 1;
 
                     // we have to continue checking entries even after we find an
                     // uninitialized one for the same reason as uninitialized buckets
                     if entry.active.load(Ordering::Acquire) {
                         self.location.index += 1;
-                        return Some(entry);
+                        return Some((index, entry));
                     }
                 }
             }
@@ -282,16 +283,17 @@ impl Iter {
         None
     }
 
-    pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<&'v T> {
+    pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v T)> {
         self.next(vec)
-            .map(|entry| unsafe { entry.value_unchecked() })
+            .map(|(index, entry)| (index, unsafe { entry.value_unchecked() }))
     }
 
     pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
-        self.next(vec).map(|entry| unsafe {
+        self.next(vec).map(|(index, entry)| unsafe {
             entry.active.store(false, Ordering::Relaxed);
             // SAFETY: `next` only yields initialized entries
-            mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit()).assume_init()
+            let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());
+            value.assume_init()
         })
     }
 

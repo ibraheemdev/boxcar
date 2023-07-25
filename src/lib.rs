@@ -209,15 +209,19 @@ impl<T> Vec<T> {
 
     /// Returns an iterator over the vector.
     ///
+    /// Values are yielded in the form `(index, value)`. The vector may
+    /// have in-progress concurrent writes that create gaps, so `index`
+    /// may not be strictly sequential.
+    ///
     /// # Examples
     ///
     /// ```
     /// let vec = boxcar::vec![1, 2, 4];
     /// let mut iterator = vec.iter();
     ///
-    /// assert_eq!(iterator.next(), Some(&1));
-    /// assert_eq!(iterator.next(), Some(&2));
-    /// assert_eq!(iterator.next(), Some(&4));
+    /// assert_eq!(iterator.next(), Some((0, &1)));
+    /// assert_eq!(iterator.next(), Some((1, &2)));
+    /// assert_eq!(iterator.next(), Some((2, &4)));
     /// assert_eq!(iterator.next(), None);
     /// ```
     pub fn iter(&self) -> Iter<'_, T> {
@@ -249,7 +253,7 @@ impl<T> IntoIterator for Vec<T> {
 }
 
 impl<'a, T> IntoIterator for &'a Vec<T> {
-    type Item = &'a T;
+    type Item = (usize, &'a T);
     type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -287,7 +291,7 @@ pub struct Iter<'a, T> {
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
+    type Item = (usize, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.raw.next_shared(self.vec)
@@ -330,7 +334,7 @@ impl<T> Extend<T> for Vec<T> {
 
 impl<T: Clone> Clone for Vec<T> {
     fn clone(&self) -> Vec<T> {
-        self.iter().cloned().collect()
+        self.iter().map(|(_, x)| x).cloned().collect()
     }
 }
 
