@@ -289,7 +289,7 @@ impl Iter {
     }
 
     pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
-        self.next(vec).map(|(index, entry)| unsafe {
+        self.next(vec).map(|(_, entry)| unsafe {
             entry.active.store(false, Ordering::Relaxed);
             // SAFETY: `next` only yields initialized entries
             let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());

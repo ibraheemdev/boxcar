@@ -44,7 +44,7 @@ fn main() {
     }
 
     for i in 0..6 {
-        assert!(vec.iter().any(|&x| x == i));
+        assert!(vec.iter().any(|(_, &x)| x == i));
     }
 }
 ```
