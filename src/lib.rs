@@ -350,7 +350,14 @@ impl<T: PartialEq> PartialEq for Vec<T> {
             return false;
         }
 
-        self.iter().zip(other).all(|(a, b)| a == b)
+        // ensure indexes are checked along with values to handle gaps in the vector
+        for (index, value) in self.iter() {
+            if other.get(index) != Some(value) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -366,7 +373,14 @@ where
             return false;
         }
 
-        self.iter().zip(other).all(|(a, b)| a == b)
+        // ensure indexes are checked along with values to handle gaps in the vector
+        for (index, value) in self.iter() {
+            if other.get(index) != Some(value) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
