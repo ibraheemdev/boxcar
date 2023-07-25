@@ -48,7 +48,7 @@ macro_rules! vec {
 /// # Notes
 ///
 /// The bucket array is stored inline, meaning that the
-/// a `Vec<T>` is quite large. It is expected that you
+/// `Vec<T>` is quite large. It is expected that you
 /// store it behind an [`Arc`](std::sync::Arc) or similar.
 pub struct Vec<T> {
     raw: raw::Vec<T>,
@@ -204,7 +204,7 @@ impl<T> Vec<T> {
         unsafe { self.raw.get_unchecked(index) }
     }
 
-    /// Returns an iterator over the slice.
+    /// Returns an iterator over the vector.
     ///
     /// # Examples
     ///

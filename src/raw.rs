@@ -22,7 +22,7 @@ pub struct Vec<T> {
 }
 
 unsafe impl<T: Send> Send for Vec<T> {}
-unsafe impl<T: Send> Sync for Vec<T> {}
+unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
     // Constructs a new, empty `Vec<T>` with the specified capacity.
@@ -74,7 +74,6 @@ impl<T> Vec<T> {
 
             // someone allocated before us
             if !bucket.entries.load(Ordering::Relaxed).is_null() {
-                drop(_allocating);
                 break;
             }
 
@@ -302,7 +301,7 @@ impl Iter {
     pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
         self.next(vec).map(|entry| unsafe {
             entry.active.store(false, Ordering::Relaxed);
-            // SAFETY: RawIter only yields initialized entries
+            // SAFETY: `next` only yields initialized entries
             mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit()).assume_init()
         })
     }
