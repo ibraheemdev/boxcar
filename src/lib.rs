@@ -220,7 +220,6 @@ impl<T> Vec<T> {
         unsafe { self.raw.get_unchecked(index) }
     }
 
-
     /// Returns a mutable reference to an element, without doing bounds
     /// checking or verifying that the element is fully initialized.
     ///
@@ -360,13 +359,11 @@ impl<T> Extend<T> for Vec<T> {
         let iter = iter.into_iter();
 
         let (lower, _) = iter.size_hint();
-        let vec = self.reserve(lower);
+        self.reserve(lower);
 
         for value in iter {
             self.push(value);
         }
-
-        vec
     }
 }
 

@@ -386,9 +386,7 @@ impl<T> Bucket<T> {
 impl<T> Drop for Entry<T> {
     fn drop(&mut self) {
         if *self.active.get_mut() {
-            unsafe {
-                let _ = ptr::drop_in_place((*self.slot.get()).as_mut_ptr());
-            }
+            unsafe { ptr::drop_in_place((*self.slot.get()).as_mut_ptr()) }
         }
     }
 }
