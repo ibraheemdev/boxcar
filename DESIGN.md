@@ -1,3 +1,5 @@
+# Design
+
 A concurrent vector is represented as an array of lazily allocated buckets, of sizes `1, 2, 4 .. 2^63`:
 
 ```text

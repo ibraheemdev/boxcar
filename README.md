@@ -1,4 +1,4 @@
-# Boxcar
+# `boxcar`
 
 [![Crate](https://img.shields.io/crates/v/boxcar?style=for-the-badge)](https://crates.io/crates/boxcar)
 [![Github](https://img.shields.io/badge/github-boxcar-success?style=for-the-badge)](https://github.com/ibraheemdev/boxcar)
