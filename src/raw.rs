@@ -136,7 +136,7 @@ impl<T> Vec<T> {
 
         self.count.fetch_add(1, Ordering::Release);
 
-        location.index
+        index
     }
 
     // Returns the number of elements in the vector.
@@ -249,11 +249,12 @@ impl<T> Vec<T> {
     // Returns an iterator over the vector.
     pub fn iter(&self) -> Iter {
         Iter {
+            index: 0,
+            yielded: 0,
             location: Location {
                 bucket: 0,
                 bucket_len: 1,
                 entry: 0,
-                index: 0,
             },
         }
     }
@@ -285,6 +286,8 @@ impl<T> Drop for Vec<T> {
 
 pub struct Iter {
     location: Location,
+    yielded: usize,
+    index: usize,
 }
 
 impl Iter {
@@ -314,13 +317,14 @@ impl Iter {
                 while self.location.entry < self.location.bucket_len {
                     // SAFETY: bounds checked above
                     let entry = unsafe { &*entries.add(self.location.entry) };
-                    let index = self.location.index;
+                    let index = self.index;
                     self.location.entry += 1;
+                    self.index += 1;
 
                     // we have to continue checking entries even after we find an
                     // uninitialized one for the same reason as uninitialized buckets
                     if entry.active.load(Ordering::Acquire) {
-                        self.location.index += 1;
+                        self.yielded += 1;
                         return Some((index, entry));
                     }
                 }
@@ -349,7 +353,7 @@ impl Iter {
     }
 
     pub fn yielded(&self) -> usize {
-        self.location.index
+        self.yielded
     }
 }
 
@@ -411,8 +415,6 @@ impl<T> Entry<T> {
 
 #[derive(Debug)]
 struct Location {
-    // the index of the element in the vector
-    index: usize,
     // the index of the bucket
     bucket: usize,
     // the length of `bucket`
@@ -428,7 +430,6 @@ impl Location {
         let entry = if index == 0 { 0 } else { index ^ bucket_len };
 
         Location {
-            index,
             bucket,
             bucket_len,
             entry,
@@ -451,5 +452,12 @@ mod tests {
 
         let max = Location::of(MAX_ENTRIES);
         assert_eq!(max.bucket, BUCKETS - 1);
+    }
+
+    #[test]
+    fn iterator() {
+        let vec = (0..100).collect::<crate::Vec<usize>>();
+        vec.iter().for_each(|(a, &b)| assert_eq!(a, b));
+        vec.iter().for_each(|(a, &b)| assert_eq!(vec[a], b));
     }
 }
