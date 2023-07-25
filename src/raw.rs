@@ -13,16 +13,15 @@ pub struct Vec<T> {
     // buckets of length 1, 1, 2, 4, 8 .. 2^63
     buckets: [Bucket<T>; BUCKETS],
     // the number of elements in this vector
-    len: AtomicUsize,
-    // a counter used to retrieve a unique index
-    // to push to. this value may be more than
-    // the true length as it will be incremented
-    // before values are actually stored
+    count: AtomicUsize,
+    // a counter used to retrieve a unique index to push to.
+    // this value may be more than the true length as it will
+    // be incremented before values are actually stored.
     inflight: AtomicUsize,
 }
 
 unsafe impl<T: Send> Send for Vec<T> {}
-unsafe impl<T: Send> Sync for Vec<T> {}
+unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
     // Constructs a new, empty `Vec<T>` with the specified capacity.
@@ -43,7 +42,7 @@ impl<T> Vec<T> {
         Vec {
             buckets: buckets.map(Bucket::from_raw),
             inflight: AtomicUsize::new(0),
-            len: AtomicUsize::new(0),
+            count: AtomicUsize::new(0),
         }
     }
 
@@ -51,15 +50,14 @@ impl<T> Vec<T> {
     // in the given `Vec<T>`. The collection may reserve more space to avoid
     // frequent reallocations.
     pub fn reserve(&self, additional: usize) {
-        let len = self.len.load(Ordering::Acquire);
+        let len = self.count.load(Ordering::Acquire);
         let location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRIES));
 
         let mut bucket_index = location.bucket;
         let mut bucket_len = location.bucket_len;
 
-        // allocate buckets starting from the bucket
-        // at `len + additional` and working our way
-        // backwards
+        // allocate buckets starting from the bucket at `len + additional` and
+        // working our way backwards
         loop {
             // SAFETY: we have enough buckets for `usize::MAX` entries
             let bucket = unsafe { self.buckets.get_unchecked(bucket_index) };
@@ -74,7 +72,6 @@ impl<T> Vec<T> {
 
             // someone allocated before us
             if !bucket.entries.load(Ordering::Relaxed).is_null() {
-                drop(_allocating);
                 break;
             }
 
@@ -97,8 +94,7 @@ impl<T> Vec<T> {
         let location = Location::of(index);
 
         // SAFETY: we have enough buckets for usize::MAX entries.
-        // technically `inflight` could overflow, but that would
-        // require pushing `usize::MAX + 1` times
+        // we assume that `inflight` cannot realistically overflow.
         let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
         let mut entries = bucket.entries.load(Ordering::Acquire);
 
@@ -138,14 +134,14 @@ impl<T> Vec<T> {
             entry.active.store(true, Ordering::Release);
         }
 
-        self.len.fetch_add(1, Ordering::Release);
+        self.count.fetch_add(1, Ordering::Release);
 
         location.index
     }
 
     // Returns the number of elements in the vector.
-    pub fn len(&self) -> usize {
-        self.len.load(Ordering::Acquire)
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::Acquire)
     }
 
     // Returns a reference to the element at the given index.
@@ -185,8 +181,8 @@ impl<T> Vec<T> {
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         let location = Location::of(index);
 
-        // SAFETY: caller guarantees index is in bounds and
-        // entry is present.
+        // SAFETY: caller guarantees the index is in bounds and
+        // the entry is present.
         unsafe {
             let entry = self
                 .buckets
@@ -280,11 +276,9 @@ impl<T> Drop for Vec<T> {
                 break;
             }
 
-            // SAFETY: we have &mut self
             let len = Location::bucket_len(i);
-            unsafe {
-                let _ = Box::from_raw(slice::from_raw_parts_mut(entries, len));
-            }
+            // SAFETY: we have &mut self
+            unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(entries, len))) }
         }
     }
 }
@@ -294,17 +288,14 @@ pub struct Iter {
 }
 
 impl Iter {
-    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<&'v Entry<T>> {
-        if self.yielded() == vec.len() {
+    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v Entry<T>)> {
+        if self.yielded() == vec.count() {
             return None;
         }
 
-        // it is possible that the the length
-        // was incremented due to an element
-        // being stored in a bucket that we
-        // have already iterated over, so we
-        // still have to check that we are in
-        // bounds
+        // it is possible that the the length was incremented due to an element
+        // being stored in a bucket that we have already iterated over, so we
+        // still have to check that we are in bounds
         while self.location.bucket < BUCKETS {
             // SAFETY: bounds checked above
             let entries = unsafe {
@@ -314,25 +305,23 @@ impl Iter {
                     .load(Ordering::Acquire)
             };
 
-            // just because this bucket is not initialized
-            // doesn't mean all subsequent buckets aren't.
-            // a push may have acquired an index in a new
-            // bucket before a previous push finished storing,
-            // so we have to continue checking all buckets
-            // until we yield `vec.len()` elements
+            // just because this bucket is not initialized doesn't mean all
+            // subsequent buckets aren't. a push may have acquired an index
+            // in a new bucket before a previous push finished storing, so
+            // we have to continue checking every bucket until we yield
+            // `vec.count()` elements
             if !entries.is_null() {
                 while self.location.entry < self.location.bucket_len {
                     // SAFETY: bounds checked above
                     let entry = unsafe { &*entries.add(self.location.entry) };
+                    let index = self.location.index;
                     self.location.entry += 1;
 
-                    // we have to continue checking
-                    // entries even after we find an
-                    // uninitialized one for the same
-                    // reason as uninitialized buckets
+                    // we have to continue checking entries even after we find an
+                    // uninitialized one for the same reason as uninitialized buckets
                     if entry.active.load(Ordering::Acquire) {
                         self.location.index += 1;
-                        return Some(entry);
+                        return Some((index, entry));
                     }
                 }
             }
@@ -345,16 +334,17 @@ impl Iter {
         None
     }
 
-    pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<&'v T> {
+    pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v T)> {
         self.next(vec)
-            .map(|entry| unsafe { entry.value_unchecked() })
+            .map(|(index, entry)| (index, unsafe { entry.value_unchecked() }))
     }
 
     pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
-        self.next(vec).map(|entry| unsafe {
+        self.next(vec).map(|(_, entry)| unsafe {
             entry.active.store(false, Ordering::Relaxed);
-            // SAFETY: RawIter only yields initialized entries
-            mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit()).assume_init()
+            // SAFETY: `next` only yields initialized entries
+            let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());
+            value.assume_init()
         })
     }
 
@@ -449,5 +439,19 @@ impl Location {
 
     fn bucket_len(bucket: usize) -> usize {
         1 << bucket.saturating_sub(1)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn location() {
+        let min = Location::of(0);
+        assert_eq!(min.bucket, 0);
+
+        let max = Location::of(MAX_ENTRIES);
+        assert_eq!(max.bucket, BUCKETS - 1);
     }
 }

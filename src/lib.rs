@@ -48,7 +48,7 @@ macro_rules! vec {
 /// # Notes
 ///
 /// The bucket array is stored inline, meaning that the
-/// a `Vec<T>` is quite large. It is expected that you
+/// `Vec<T>` is quite large. It is expected that you
 /// store it behind an [`Arc`](std::sync::Arc) or similar.
 pub struct Vec<T> {
     raw: raw::Vec<T>,
@@ -136,18 +136,21 @@ impl<T> Vec<T> {
 
     /// Returns the number of elements in the vector.
     ///
+    /// Note that due to concurrent writes, it is not guaranteed
+    /// that all elements `0..vec.count()` are initialized.
+    ///
     /// # Examples
     ///
     /// ```
     /// let vec = boxcar::Vec::new();
-    /// assert_eq!(vec.len(), 0);
+    /// assert_eq!(vec.count(), 0);
     /// vec.push(1);
     /// vec.push(2);
-    /// assert_eq!(vec.len(), 2);
+    /// assert_eq!(vec.count(), 2);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
-        self.raw.len()
+    pub fn count(&self) -> usize {
+        self.raw.count()
     }
 
     /// Returns `true` if the vector contains no elements.
@@ -163,7 +166,7 @@ impl<T> Vec<T> {
     /// ```
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.count() == 0
     }
 
     /// Returns a reference to the element at the given index.
@@ -217,6 +220,7 @@ impl<T> Vec<T> {
         unsafe { self.raw.get_unchecked(index) }
     }
 
+
     /// Returns a mutable reference to an element, without doing bounds
     /// checking or verifying that the element is fully initialized.
     ///
@@ -241,7 +245,11 @@ impl<T> Vec<T> {
         unsafe { self.raw.get_unchecked_mut(index) }
     }
 
-    /// Returns an iterator over the slice.
+    /// Returns an iterator over the vector.
+    ///
+    /// Values are yielded in the form `(index, value)`. The vector may
+    /// have in-progress concurrent writes that create gaps, so `index`
+    /// may not be strictly sequential.
     ///
     /// # Examples
     ///
@@ -249,9 +257,9 @@ impl<T> Vec<T> {
     /// let vec = boxcar::vec![1, 2, 4];
     /// let mut iterator = vec.iter();
     ///
-    /// assert_eq!(iterator.next(), Some(&1));
-    /// assert_eq!(iterator.next(), Some(&2));
-    /// assert_eq!(iterator.next(), Some(&4));
+    /// assert_eq!(iterator.next(), Some((0, &1)));
+    /// assert_eq!(iterator.next(), Some((1, &2)));
+    /// assert_eq!(iterator.next(), Some((2, &4)));
     /// assert_eq!(iterator.next(), None);
     /// ```
     pub fn iter(&self) -> Iter<'_, T> {
@@ -283,7 +291,7 @@ impl<T> IntoIterator for Vec<T> {
 }
 
 impl<'a, T> IntoIterator for &'a Vec<T> {
-    type Item = &'a T;
+    type Item = (usize, &'a T);
     type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Self::IntoIter {
@@ -321,14 +329,14 @@ pub struct Iter<'a, T> {
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
+    type Item = (usize, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.raw.next_shared(self.vec)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.vec.len() - self.raw.yielded(), None)
+        (self.vec.count() - self.raw.yielded(), None)
     }
 }
 
@@ -364,7 +372,7 @@ impl<T> Extend<T> for Vec<T> {
 
 impl<T: Clone> Clone for Vec<T> {
     fn clone(&self) -> Vec<T> {
-        self.iter().cloned().collect()
+        self.iter().map(|(_, x)| x).cloned().collect()
     }
 }
 
@@ -376,11 +384,18 @@ impl<T: fmt::Debug> fmt::Debug for Vec<T> {
 
 impl<T: PartialEq> PartialEq for Vec<T> {
     fn eq(&self, other: &Self) -> bool {
-        if self.len() != other.len() {
+        if self.count() != other.count() {
             return false;
         }
 
-        self.iter().zip(other).all(|(a, b)| a == b)
+        // ensure indexes are checked along with values to handle gaps in the vector
+        for (index, value) in self.iter() {
+            if other.get(index) != Some(value) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -392,11 +407,18 @@ where
     fn eq(&self, other: &A) -> bool {
         let other = other.as_ref();
 
-        if self.len() != other.len() {
+        if self.count() != other.len() {
             return false;
         }
 
-        self.iter().zip(other).all(|(a, b)| a == b)
+        // ensure indexes are checked along with values to handle gaps in the vector
+        for (index, value) in self.iter() {
+            if other.get(index) != Some(value) {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
