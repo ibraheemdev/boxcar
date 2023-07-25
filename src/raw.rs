@@ -14,10 +14,9 @@ pub struct Vec<T> {
     buckets: [Bucket<T>; BUCKETS],
     // the number of elements in this vector
     count: AtomicUsize,
-    // a counter used to retrieve a unique index
-    // to push to. this value may be more than
-    // the true length as it will be incremented
-    // before values are actually stored
+    // a counter used to retrieve a unique index to push to.
+    // this value may be more than the true length as it will
+    // be incremented before values are actually stored.
     inflight: AtomicUsize,
 }
 
@@ -57,9 +56,8 @@ impl<T> Vec<T> {
         let mut bucket_index = location.bucket;
         let mut bucket_len = location.bucket_len;
 
-        // allocate buckets starting from the bucket
-        // at `len + additional` and working our way
-        // backwards
+        // allocate buckets starting from the bucket at `len + additional` and
+        // working our way backwards
         loop {
             // SAFETY: we have enough buckets for `usize::MAX` entries
             let bucket = unsafe { self.buckets.get_unchecked(bucket_index) };
@@ -96,8 +94,7 @@ impl<T> Vec<T> {
         let location = Location::of(index);
 
         // SAFETY: we have enough buckets for usize::MAX entries.
-        // technically `inflight` could overflow, but that would
-        // require pushing `usize::MAX + 1` times
+        // we assume that `inflight` cannot realistically overflow.
         let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
         let mut entries = bucket.entries.load(Ordering::Acquire);
 
@@ -184,8 +181,8 @@ impl<T> Vec<T> {
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         let location = Location::of(index);
 
-        // SAFETY: caller guarantees index is in bounds and
-        // entry is present.
+        // SAFETY: caller guarantees the index is in bounds and
+        // the entry is present.
         unsafe {
             let entry = self
                 .buckets
@@ -228,11 +225,9 @@ impl<T> Drop for Vec<T> {
                 break;
             }
 
-            // SAFETY: we have &mut self
             let len = Location::bucket_len(i);
-            unsafe {
-                let _ = Box::from_raw(slice::from_raw_parts_mut(entries, len));
-            }
+            // SAFETY: we have &mut self
+            unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(entries, len))) }
         }
     }
 }
@@ -243,16 +238,13 @@ pub struct Iter {
 
 impl Iter {
     fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<&'v Entry<T>> {
-        if self.yielded() == vec.len() {
+        if self.yielded() == vec.count() {
             return None;
         }
 
-        // it is possible that the the length
-        // was incremented due to an element
-        // being stored in a bucket that we
-        // have already iterated over, so we
-        // still have to check that we are in
-        // bounds
+        // it is possible that the the length was incremented due to an element
+        // being stored in a bucket that we have already iterated over, so we
+        // still have to check that we are in bounds
         while self.location.bucket < BUCKETS {
             // SAFETY: bounds checked above
             let entries = unsafe {
@@ -262,22 +254,19 @@ impl Iter {
                     .load(Ordering::Acquire)
             };
 
-            // just because this bucket is not initialized
-            // doesn't mean all subsequent buckets aren't.
-            // a push may have acquired an index in a new
-            // bucket before a previous push finished storing,
-            // so we have to continue checking all buckets
-            // until we yield `vec.len()` elements
+            // just because this bucket is not initialized doesn't mean all
+            // subsequent buckets aren't. a push may have acquired an index
+            // in a new bucket before a previous push finished storing, so
+            // we have to continue checking every bucket until we yield
+            // `vec.count()` elements
             if !entries.is_null() {
                 while self.location.entry < self.location.bucket_len {
                     // SAFETY: bounds checked above
                     let entry = unsafe { &*entries.add(self.location.entry) };
                     self.location.entry += 1;
 
-                    // we have to continue checking
-                    // entries even after we find an
-                    // uninitialized one for the same
-                    // reason as uninitialized buckets
+                    // we have to continue checking entries even after we find an
+                    // uninitialized one for the same reason as uninitialized buckets
                     if entry.active.load(Ordering::Acquire) {
                         self.location.index += 1;
                         return Some(entry);
