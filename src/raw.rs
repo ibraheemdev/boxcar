@@ -2,15 +2,14 @@ use std::cell::UnsafeCell;
 use std::mem::{self, MaybeUninit};
 use std::ops::Index;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
-use std::sync::Mutex;
 use std::{ptr, slice};
 
-const BUCKETS: usize = (usize::BITS + 1) as _;
-const MAX_ENTRIES: usize = usize::MAX;
+const BUCKETS: usize = (usize::BITS as usize) - SKIP_BUCKET;
+const MAX_ENTRIES: usize = usize::MAX - SKIP;
 
 // A lock-free, append-only vector.
 pub struct Vec<T> {
-    // buckets of length 1, 1, 2, 4, 8 .. 2^63
+    // buckets of length 32, 64 .. 2^63
     buckets: [Bucket<T>; BUCKETS],
     // the number of elements in this vector
     count: AtomicUsize,
@@ -40,9 +39,25 @@ impl<T> Vec<T> {
         }
 
         Vec {
-            buckets: buckets.map(Bucket::from_raw),
+            buckets: buckets.map(Bucket::new),
             inflight: AtomicUsize::new(0),
             count: AtomicUsize::new(0),
+        }
+    }
+
+    fn get_or_alloc(bucket: &Bucket<T>, len: usize) -> *mut Entry<T> {
+        let entries = Bucket::alloc(len);
+        match bucket.entries.compare_exchange(
+            ptr::null_mut(),
+            entries,
+            Ordering::Release,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => entries,
+            Err(found) => unsafe {
+                Bucket::dealloc(entries, len);
+                found
+            },
         }
     }
 
@@ -51,24 +66,18 @@ impl<T> Vec<T> {
     // frequent reallocations.
     pub fn reserve(&self, additional: usize) {
         let len = self.count.load(Ordering::Acquire);
-        let location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRIES));
-
-        let mut bucket_index = location.bucket;
-        let mut bucket_len = location.bucket_len;
+        let mut location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRIES));
 
         // allocate buckets starting from the bucket at `len + additional` and
         // working our way backwards
         loop {
-            // SAFETY: we have enough buckets for `usize::MAX` entries
-            let bucket = unsafe { self.buckets.get_unchecked(bucket_index) };
+            // safety: we have enough buckets for `usize::MAX` entries
+            let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
 
             // reached an initalized bucket, we're done
             if !bucket.entries.load(Ordering::Acquire).is_null() {
                 break;
             }
-
-            // guard against concurrent allocations
-            let _allocating = bucket.lock.lock().unwrap();
 
             // someone allocated before us
             if !bucket.entries.load(Ordering::Relaxed).is_null() {
@@ -76,15 +85,14 @@ impl<T> Vec<T> {
             }
 
             // otherwise, allocate the bucket
-            let new_entries = Bucket::alloc(bucket_len);
-            bucket.entries.store(new_entries, Ordering::Release);
+            Vec::get_or_alloc(bucket, location.bucket_len);
 
-            if bucket_index == 0 {
+            if location.bucket == 0 {
                 break;
             }
 
-            bucket_index -= 1;
-            bucket_len = Location::bucket_len(bucket_index);
+            location.bucket -= 1;
+            location.bucket_len = Location::bucket_len(location.bucket);
         }
     }
 
@@ -93,33 +101,28 @@ impl<T> Vec<T> {
         let index = self.inflight.fetch_add(1, Ordering::Relaxed);
         let location = Location::of(index);
 
-        // SAFETY: we have enough buckets for usize::MAX entries.
+        // eagerly allocate the next bucket if we are close to the end of this one
+        if index == (location.bucket_len - (location.bucket_len >> 3)) {
+            if let Some(next_bucket) = self.buckets.get(location.bucket + 1) {
+                Vec::get_or_alloc(next_bucket, location.bucket_len << 1);
+            }
+        }
+
+        // safety: we have enough buckets for usize::MAX entries.
         // we assume that `inflight` cannot realistically overflow.
         let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
         let mut entries = bucket.entries.load(Ordering::Acquire);
 
         // the bucket has not been allocated yet
         if entries.is_null() {
-            // guard against concurrent allocations
-            let _allocating = bucket.lock.lock().unwrap();
-
-            let new_entries = bucket.entries.load(Ordering::Acquire);
-            if !new_entries.is_null() {
-                // someone allocated before us
-                entries = new_entries;
-            } else {
-                // otherwise allocate the bucket
-                let alloc = Bucket::alloc(location.bucket_len);
-                bucket.entries.store(alloc, Ordering::Release);
-                entries = alloc;
-            }
+            entries = Vec::get_or_alloc(bucket, location.bucket_len);
         }
 
         unsafe {
-            // SAFETY: `location.entry` is always in bounds for `location.bucket`
+            // safety: `location.entry` is always in bounds for `location.bucket`
             let entry = &*entries.add(location.entry);
 
-            // SAFETY: we have unique access to this entry.
+            // safety: we have unique access to this entry.
             //
             // 1. it is impossible for another thread to attempt
             // a `push` to this location as we retreived it with
@@ -129,8 +132,7 @@ impl<T> Vec<T> {
             // `active == false`, and will not try to access it
             entry.slot.get().write(MaybeUninit::new(value));
 
-            // let other threads know that this slot
-            // is active
+            // let other threads know that this slot is active
             entry.active.store(true, Ordering::Release);
         }
 
@@ -148,7 +150,7 @@ impl<T> Vec<T> {
     pub fn get(&self, index: usize) -> Option<&T> {
         let location = Location::of(index);
 
-        // SAFETY: we have enough buckets for `usize::MAX` entries
+        // safety: we have enough buckets for `usize::MAX` entries
         let entries = unsafe {
             self.buckets
                 .get_unchecked(location.bucket)
@@ -161,11 +163,11 @@ impl<T> Vec<T> {
             return None;
         }
 
-        // SAFETY: `location.entry` is always in bounds for `location.bucket`
+        // safety: `location.entry` is always in bounds for `location.bucket`
         let entry = unsafe { &*entries.add(location.entry) };
 
         if entry.active.load(Ordering::Acquire) {
-            // SAFETY: the entry is active
+            // safety: the entry is active
             unsafe { return Some(entry.value_unchecked()) }
         }
 
@@ -181,7 +183,7 @@ impl<T> Vec<T> {
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         let location = Location::of(index);
 
-        // SAFETY: caller guarantees the index is in bounds and
+        // safety: caller guarantees the index is in bounds and
         // the entry is present.
         unsafe {
             let entry = self
@@ -199,7 +201,7 @@ impl<T> Vec<T> {
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         let location = Location::of(index);
 
-        // SAFETY: we have enough buckets for `usize::MAX` entries
+        // safety: we have enough buckets for `usize::MAX` entries
         let entries = unsafe {
             self.buckets
                 .get_unchecked_mut(location.bucket)
@@ -212,11 +214,11 @@ impl<T> Vec<T> {
             return None;
         }
 
-        // SAFETY: `location.entry` is always in bounds for `location.bucket`
+        // safety: `location.entry` is always in bounds for `location.bucket`
         let entry = unsafe { &mut *entries.add(location.entry) };
 
         if *entry.active.get_mut() {
-            // SAFETY: the entry is active
+            // safety: the entry is active
             unsafe { return Some(entry.value_unchecked_mut()) }
         }
 
@@ -232,7 +234,7 @@ impl<T> Vec<T> {
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
         let location = Location::of(index);
 
-        // SAFETY: caller guarantees index is in bounds and
+        // safety: caller guarantees index is in bounds and
         // entry is present.
         unsafe {
             let entry = self
@@ -278,8 +280,8 @@ impl<T> Drop for Vec<T> {
             }
 
             let len = Location::bucket_len(i);
-            // SAFETY: we have &mut self
-            unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(entries, len))) }
+            // safety: in drop
+            unsafe { Bucket::dealloc(entries, len) }
         }
     }
 }
@@ -300,7 +302,7 @@ impl Iter {
         // being stored in a bucket that we have already iterated over, so we
         // still have to check that we are in bounds
         while self.location.bucket < BUCKETS {
-            // SAFETY: bounds checked above
+            // safety: bounds checked above
             let entries = unsafe {
                 vec.buckets
                     .get_unchecked(self.location.bucket)
@@ -315,7 +317,7 @@ impl Iter {
             // `vec.count()` elements
             if !entries.is_null() {
                 while self.location.entry < self.location.bucket_len {
-                    // SAFETY: bounds checked above
+                    // safety: bounds checked above
                     let entry = unsafe { &*entries.add(self.location.entry) };
                     let index = self.index;
                     self.location.entry += 1;
@@ -346,7 +348,7 @@ impl Iter {
     pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
         self.next(vec).map(|(_, entry)| unsafe {
             entry.active.store(false, Ordering::Relaxed);
-            // SAFETY: `next` only yields initialized entries
+            // safety: `next` only yields initialized entries
             let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());
             value.assume_init()
         })
@@ -358,7 +360,6 @@ impl Iter {
 }
 
 struct Bucket<T> {
-    lock: Mutex<()>,
     entries: AtomicPtr<Entry<T>>,
 }
 
@@ -379,18 +380,13 @@ impl<T> Bucket<T> {
         Box::into_raw(entries) as _
     }
 
-    fn from_raw(entries: *mut Entry<T>) -> Bucket<T> {
-        Bucket {
-            lock: Mutex::new(()),
-            entries: AtomicPtr::new(entries),
-        }
+    unsafe fn dealloc(entries: *mut Entry<T>, len: usize) {
+        unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(entries, len))) }
     }
-}
 
-impl<T> Drop for Entry<T> {
-    fn drop(&mut self) {
-        if *self.active.get_mut() {
-            unsafe { ptr::drop_in_place((*self.slot.get()).as_mut_ptr()) }
+    fn new(entries: *mut Entry<T>) -> Bucket<T> {
+        Bucket {
+            entries: AtomicPtr::new(entries),
         }
     }
 }
@@ -400,7 +396,7 @@ impl<T> Entry<T> {
     //
     // Value must be initialized.
     unsafe fn value_unchecked(&self) -> &T {
-        // SAFETY: guaranteed by caller
+        // safety: guaranteed by caller
         unsafe { (*self.slot.get()).assume_init_ref() }
     }
 
@@ -408,8 +404,16 @@ impl<T> Entry<T> {
     //
     // Value must be initialized.
     unsafe fn value_unchecked_mut(&mut self) -> &mut T {
-        // SAFETY: guaranteed by caller
+        // safety: guaranteed by caller
         unsafe { self.slot.get_mut().assume_init_mut() }
+    }
+}
+
+impl<T> Drop for Entry<T> {
+    fn drop(&mut self) {
+        if *self.active.get_mut() {
+            unsafe { ptr::drop_in_place((*self.slot.get()).as_mut_ptr()) }
+        }
     }
 }
 
@@ -423,11 +427,18 @@ struct Location {
     entry: usize,
 }
 
+// skip the shorter buckets to avoid unnecessary allocations.
+// this also reduces the maximum capacity of a vector.
+const SKIP: usize = 32;
+const SKIP_BUCKET: usize = ((usize::BITS - SKIP.leading_zeros()) as usize) - 1;
+
 impl Location {
     fn of(index: usize) -> Location {
-        let bucket = (usize::BITS - index.leading_zeros()) as usize;
+        let skipped = index.checked_add(SKIP).expect("exceeded maximum length");
+        let bucket = usize::BITS - skipped.leading_zeros();
+        let bucket = (bucket as usize) - (SKIP_BUCKET + 1);
         let bucket_len = Location::bucket_len(bucket);
-        let entry = if index == 0 { 0 } else { index ^ bucket_len };
+        let entry = skipped ^ bucket_len;
 
         Location {
             bucket,
@@ -437,7 +448,7 @@ impl Location {
     }
 
     fn bucket_len(bucket: usize) -> usize {
-        1 << bucket.saturating_sub(1)
+        1 << (bucket + SKIP_BUCKET)
     }
 }
 
@@ -447,17 +458,25 @@ mod tests {
 
     #[test]
     fn location() {
-        let min = Location::of(0);
-        assert_eq!(min.bucket, 0);
+        assert_eq!(Location::bucket_len(0), 32);
+        for i in 0..32 {
+            let loc = Location::of(i);
+            assert_eq!(loc.bucket_len, 32);
+            assert_eq!(loc.bucket, 0);
+            assert_eq!(loc.entry, i);
+        }
+
+        assert_eq!(Location::bucket_len(1), 64);
+        for i in 33..96 {
+            let loc = Location::of(i);
+            assert_eq!(loc.bucket_len, 64);
+            assert_eq!(loc.bucket, 1);
+            assert_eq!(loc.entry, i - 32);
+        }
 
         let max = Location::of(MAX_ENTRIES);
         assert_eq!(max.bucket, BUCKETS - 1);
-    }
-
-    #[test]
-    fn iterator() {
-        let vec = (0..100).collect::<crate::Vec<usize>>();
-        vec.iter().for_each(|(a, &b)| assert_eq!(a, b));
-        vec.iter().for_each(|(a, &b)| assert_eq!(vec[a], b));
+        assert_eq!(max.bucket_len, 1 << 63);
+        assert_eq!(max.entry, (1 << 63) - 1);
     }
 }
