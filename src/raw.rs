@@ -203,7 +203,7 @@ impl<T> Vec<T> {
             ptr::null_mut(),
             entries,
             Ordering::Release,
-            Ordering::Relaxed,
+            Ordering::Acquire,
         ) {
             Ok(_) => entries,
             Err(found) => unsafe {
@@ -256,8 +256,8 @@ impl<T> Vec<T> {
             yielded: 0,
             location: Location {
                 bucket: 0,
-                bucket_len: 1,
                 entry: 0,
+                bucket_len: Location::bucket_len(0),
             },
         }
     }
@@ -336,7 +336,10 @@ impl Iter {
 
             self.location.entry = 0;
             self.location.bucket += 1;
-            self.location.bucket_len = Location::bucket_len(self.location.bucket);
+
+            if self.location.bucket < BUCKETS {
+                self.location.bucket_len = Location::bucket_len(self.location.bucket);
+            }
         }
 
         None
@@ -474,6 +477,14 @@ mod tests {
             assert_eq!(loc.bucket_len, 64);
             assert_eq!(loc.bucket, 1);
             assert_eq!(loc.entry, i - 32);
+        }
+
+        assert_eq!(Location::bucket_len(2), 128);
+        for i in 96..224 {
+            let loc = Location::of(i);
+            assert_eq!(loc.bucket_len, 128);
+            assert_eq!(loc.bucket, 2);
+            assert_eq!(loc.entry, i - 96);
         }
 
         let max = Location::of(MAX_ENTRIES);
