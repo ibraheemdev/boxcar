@@ -1,7 +1,7 @@
 use std::cell::UnsafeCell;
 use std::mem::{self, MaybeUninit};
 use std::ops::Index;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
 use std::{ptr, slice};
 
 const BUCKETS: usize = (usize::BITS as usize) - SKIP_BUCKET;
@@ -9,14 +9,15 @@ const MAX_ENTRIES: usize = usize::MAX - SKIP;
 
 // A lock-free, append-only vector.
 pub struct Vec<T> {
-    // buckets of length 32, 64 .. 2^63
-    buckets: [Bucket<T>; BUCKETS],
-    // the number of elements in this vector
-    count: AtomicUsize,
     // a counter used to retrieve a unique index to push to.
+    //
     // this value may be more than the true length as it will
     // be incremented before values are actually stored.
-    inflight: AtomicUsize,
+    inflight: AtomicU64,
+    // buckets of length 32, 64 .. 2^63
+    buckets: [Bucket<T>; BUCKETS],
+    // the number of initialized elements in this vector
+    count: AtomicUsize,
 }
 
 unsafe impl<T: Send> Send for Vec<T> {}
@@ -40,11 +41,162 @@ impl<T> Vec<T> {
 
         Vec {
             buckets: buckets.map(Bucket::new),
-            inflight: AtomicUsize::new(0),
+            inflight: AtomicU64::new(0),
             count: AtomicUsize::new(0),
         }
     }
 
+    // Returns the number of elements in the vector.
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::Acquire)
+    }
+
+    // Returns a reference to the element at the given index.
+    pub fn get(&self, index: usize) -> Option<&T> {
+        let location = Location::of(index);
+
+        // safety: `location.bucket` is always in bounds
+        let entries = unsafe {
+            self.buckets
+                .get_unchecked(location.bucket)
+                .entries
+                .load(Ordering::Acquire)
+        };
+
+        // bucket is uninitialized
+        if entries.is_null() {
+            return None;
+        }
+
+        // safety: `location.entry` is always in bounds for it's bucket
+        let entry = unsafe { &*entries.add(location.entry) };
+
+        if entry.active.load(Ordering::Acquire) {
+            // safety: the entry is active
+            unsafe { return Some(entry.value_unchecked()) }
+        }
+
+        // entry is uninitialized
+        None
+    }
+
+    // Returns a reference to the element at the given index.
+    //
+    // # Safety
+    //
+    // Entry at `index` must be initialized.
+    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+        let location = Location::of(index);
+
+        // safety: caller guarantees the entry is initialized
+        unsafe {
+            let entry = self
+                .buckets
+                .get_unchecked(location.bucket)
+                .entries
+                .load(Ordering::Acquire)
+                .add(location.entry);
+
+            (*entry).value_unchecked()
+        }
+    }
+
+    // Returns a mutable reference to the element at the given index.
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        let location = Location::of(index);
+
+        // safety: `location.bucket` is always in bounds
+        let entries = unsafe {
+            self.buckets
+                .get_unchecked_mut(location.bucket)
+                .entries
+                .get_mut()
+        };
+
+        // bucket is uninitialized
+        if entries.is_null() {
+            return None;
+        }
+
+        // safety: `location.entry` is always in bounds for it's bucket
+        let entry = unsafe { &mut *entries.add(location.entry) };
+
+        if *entry.active.get_mut() {
+            // safety: the entry is active
+            unsafe { return Some(entry.value_unchecked_mut()) }
+        }
+
+        // entry is uninitialized
+        None
+    }
+
+    // Returns a mutable reference to the element at the given index.
+    //
+    // # Safety
+    //
+    // Entry at `index` must be initialized.
+    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+        let location = Location::of(index);
+
+        // safety: caller guarantees the entry is initialized
+        unsafe {
+            let entry = self
+                .buckets
+                .get_unchecked_mut(location.bucket)
+                .entries
+                .get_mut()
+                .add(location.entry);
+
+            (*entry).value_unchecked_mut()
+        }
+    }
+
+    // Appends an element to the back of the vector.
+    pub fn push(&self, value: T) -> usize {
+        let index = self.inflight.fetch_add(1, Ordering::Relaxed);
+        // the inflight counter is a `u64` to catch overflows of the vector'scapacity
+        let index: usize = index.try_into().expect("overflowed maximum capacity");
+        let location = Location::of(index);
+
+        // eagerly allocate the next bucket if we are close to the end of this one
+        if index == (location.bucket_len - (location.bucket_len >> 3)) {
+            if let Some(next_bucket) = self.buckets.get(location.bucket + 1) {
+                Vec::get_or_alloc(next_bucket, location.bucket_len << 1);
+            }
+        }
+
+        // safety: `location.bucket` is always in bounds
+        let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
+        let mut entries = bucket.entries.load(Ordering::Acquire);
+
+        // the bucket has not been allocated yet
+        if entries.is_null() {
+            entries = Vec::get_or_alloc(bucket, location.bucket_len);
+        }
+
+        unsafe {
+            // safety: `location.entry` is always in bounds for it's bucket
+            let entry = &*entries.add(location.entry);
+
+            // safety: we have unique access to this entry.
+            //
+            // 1. it is impossible for another thread to attempt a `push`
+            // to this location as we retreived it from `inflight.fetch_add`
+            //
+            // 2. any thread trying to `get` this entry will see `active == false`,
+            // and will not try to access it
+            entry.slot.get().write(MaybeUninit::new(value));
+
+            // let other threads know that this entry is active
+            entry.active.store(true, Ordering::Release);
+        }
+
+        // increase the true count
+        self.count.fetch_add(1, Ordering::Release);
+        index
+    }
+
+    // race to intialize a bucket
     fn get_or_alloc(bucket: &Bucket<T>, len: usize) -> *mut Entry<T> {
         let entries = Bucket::alloc(len);
         match bucket.entries.compare_exchange(
@@ -71,7 +223,7 @@ impl<T> Vec<T> {
         // allocate buckets starting from the bucket at `len + additional` and
         // working our way backwards
         loop {
-            // safety: we have enough buckets for `usize::MAX` entries
+            // safety: `location.bucket` is always in bounds
             let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
 
             // reached an initalized bucket, we're done
@@ -84,167 +236,16 @@ impl<T> Vec<T> {
                 break;
             }
 
-            // otherwise, allocate the bucket
+            // allocate the bucket
             Vec::get_or_alloc(bucket, location.bucket_len);
 
+            // reached the first bucket
             if location.bucket == 0 {
                 break;
             }
 
             location.bucket -= 1;
             location.bucket_len = Location::bucket_len(location.bucket);
-        }
-    }
-
-    // Appends an element to the back of the vector.
-    pub fn push(&self, value: T) -> usize {
-        let index = self.inflight.fetch_add(1, Ordering::Relaxed);
-        let location = Location::of(index);
-
-        // eagerly allocate the next bucket if we are close to the end of this one
-        if index == (location.bucket_len - (location.bucket_len >> 3)) {
-            if let Some(next_bucket) = self.buckets.get(location.bucket + 1) {
-                Vec::get_or_alloc(next_bucket, location.bucket_len << 1);
-            }
-        }
-
-        // safety: we have enough buckets for usize::MAX entries.
-        // we assume that `inflight` cannot realistically overflow.
-        let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
-        let mut entries = bucket.entries.load(Ordering::Acquire);
-
-        // the bucket has not been allocated yet
-        if entries.is_null() {
-            entries = Vec::get_or_alloc(bucket, location.bucket_len);
-        }
-
-        unsafe {
-            // safety: `location.entry` is always in bounds for `location.bucket`
-            let entry = &*entries.add(location.entry);
-
-            // safety: we have unique access to this entry.
-            //
-            // 1. it is impossible for another thread to attempt
-            // a `push` to this location as we retreived it with
-            // a `inflight.fetch_add`.
-            //
-            // 2. any thread trying to `get` this entry will see
-            // `active == false`, and will not try to access it
-            entry.slot.get().write(MaybeUninit::new(value));
-
-            // let other threads know that this slot is active
-            entry.active.store(true, Ordering::Release);
-        }
-
-        self.count.fetch_add(1, Ordering::Release);
-
-        index
-    }
-
-    // Returns the number of elements in the vector.
-    pub fn count(&self) -> usize {
-        self.count.load(Ordering::Acquire)
-    }
-
-    // Returns a reference to the element at the given index.
-    pub fn get(&self, index: usize) -> Option<&T> {
-        let location = Location::of(index);
-
-        // safety: we have enough buckets for `usize::MAX` entries
-        let entries = unsafe {
-            self.buckets
-                .get_unchecked(location.bucket)
-                .entries
-                .load(Ordering::Acquire)
-        };
-
-        // bucket is uninitialized
-        if entries.is_null() {
-            return None;
-        }
-
-        // safety: `location.entry` is always in bounds for `location.bucket`
-        let entry = unsafe { &*entries.add(location.entry) };
-
-        if entry.active.load(Ordering::Acquire) {
-            // safety: the entry is active
-            unsafe { return Some(entry.value_unchecked()) }
-        }
-
-        // entry is uninitialized
-        None
-    }
-
-    // Returns a reference to the element at the given index.
-    //
-    // # Safety
-    //
-    // Entry at `index` must be initialized.
-    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
-        let location = Location::of(index);
-
-        // safety: caller guarantees the index is in bounds and
-        // the entry is present.
-        unsafe {
-            let entry = self
-                .buckets
-                .get_unchecked(location.bucket)
-                .entries
-                .load(Ordering::Acquire)
-                .add(location.entry);
-
-            (*entry).value_unchecked()
-        }
-    }
-
-    // Returns a mutable reference to the element at the given index.
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        let location = Location::of(index);
-
-        // safety: we have enough buckets for `usize::MAX` entries
-        let entries = unsafe {
-            self.buckets
-                .get_unchecked_mut(location.bucket)
-                .entries
-                .get_mut()
-        };
-
-        // bucket is uninitialized
-        if entries.is_null() {
-            return None;
-        }
-
-        // safety: `location.entry` is always in bounds for `location.bucket`
-        let entry = unsafe { &mut *entries.add(location.entry) };
-
-        if *entry.active.get_mut() {
-            // safety: the entry is active
-            unsafe { return Some(entry.value_unchecked_mut()) }
-        }
-
-        // entry is uninitialized
-        None
-    }
-
-    // Returns a mutable reference to the element at the given index.
-    //
-    // # Safety
-    //
-    // Entry at `index` must be initialized.
-    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
-        let location = Location::of(index);
-
-        // safety: caller guarantees index is in bounds and
-        // entry is present.
-        unsafe {
-            let entry = self
-                .buckets
-                .get_unchecked_mut(location.bucket)
-                .entries
-                .get_mut()
-                .add(location.entry);
-
-            (*entry).value_unchecked_mut()
         }
     }
 
@@ -320,6 +321,7 @@ impl Iter {
                     // safety: bounds checked above
                     let entry = unsafe { &*entries.add(self.location.entry) };
                     let index = self.index;
+
                     self.location.entry += 1;
                     self.index += 1;
 
