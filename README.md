@@ -2,7 +2,7 @@
 
 [![Crate](https://img.shields.io/crates/v/boxcar?style=for-the-badge)](https://crates.io/crates/boxcar)
 [![Github](https://img.shields.io/badge/github-boxcar-success?style=for-the-badge)](https://github.com/ibraheemdev/boxcar)
-[![Docs](https://img.shields.io/badge/docs.rs-0.2.1-4d76ae?style=for-the-badge)](https://docs.rs/boxcar)
+[![Docs](https://img.shields.io/badge/docs.rs-0.2.2-4d76ae?style=for-the-badge)](https://docs.rs/boxcar)
 
 A concurrent, append-only vector.
 
