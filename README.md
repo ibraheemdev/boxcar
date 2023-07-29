@@ -73,13 +73,3 @@ fn main() {
     assert_eq!(*x, 2);
 }
 ```
-
-# Performance
-
-Below is a benchmark in which an increasing number of elements are pushed and read from the vector
-by 12 threads, comparing `boxcar::Vec` to `RwLock<Vec>`:
-
-<img width="1024" alt="Benchmark" src="https://user-images.githubusercontent.com/34988408/158077862-a2a58be5-cbf0-4a2f-bbc2-202a026678c2.png">
-
-The results show that `boxcar::Vec` scales very well under load, performing significantly better
-than lock-based solutions.
