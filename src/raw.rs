@@ -287,6 +287,7 @@ impl<T> Drop for Vec<T> {
     }
 }
 
+#[derive(Clone)]
 pub struct Iter {
     location: Location,
     yielded: usize,
@@ -422,7 +423,7 @@ impl<T> Drop for Entry<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Location {
     // the index of the bucket
     bucket: usize,
