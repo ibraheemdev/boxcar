@@ -327,6 +327,14 @@ pub struct Iter<'a, T> {
     raw: raw::Iter,
 }
 
+impl<'a, T> Clone for Iter<'a, T> {
+    fn clone(&self) -> Iter<'a, T> {
+        Iter {
+            vec: self.vec,
+            raw: self.raw.clone(),
+        }
+    }
+}
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = (usize, &'a T);
 
@@ -336,6 +344,21 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.vec.count() - self.raw.yielded(), None)
+    }
+}
+impl<'a, T: fmt::Debug> fmt::Debug for Iter<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        struct Contents<'a, T>(&'a T);
+        impl<T> fmt::Debug for Contents<'_, T>
+        where
+            T: Iterator + Clone,
+            T::Item: fmt::Debug,
+        {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_list().entries(self.0.clone()).finish()
+            }
+        }
+        f.debug_tuple("Iter").field(&Contents(self)).finish()
     }
 }
 
