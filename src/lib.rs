@@ -32,12 +32,14 @@ macro_rules! vec {
         $crate::Vec::new()
     };
     ($elem:expr; $n:expr) => {{
-        let vec = $crate::Vec::with_capacity($n);
-        vec.extend(::core::iter::repeat($elem).take($n));
+        let n = $n;
+        let mut vec = $crate::Vec::with_capacity(n);
+        let iter = ::core::iter::Iterator::take(::core::iter::repeat($elem), n);
+        ::core::iter::Extend::extend(&mut vec, iter);
         vec
     }};
     ($($x:expr),+ $(,)?) => (
-        <$crate::Vec<_> as core::iter::FromIterator<_>>::from_iter([$($x),+])
+        <$crate::Vec<_> as ::core::iter::FromIterator<_>>::from_iter([$($x),+])
     );
 }
 
