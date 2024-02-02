@@ -1,8 +1,10 @@
-use std::cell::UnsafeCell;
-use std::mem::{self, MaybeUninit};
-use std::ops::Index;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
-use std::{ptr, slice};
+use core::cell::UnsafeCell;
+use core::mem::{self, MaybeUninit};
+use core::ops::Index;
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use core::{ptr, slice};
+
+use alloc::boxed::Box;
 
 const BUCKETS: usize = (usize::BITS as usize) - SKIP_BUCKET;
 const MAX_ENTRIES: usize = usize::MAX - SKIP;

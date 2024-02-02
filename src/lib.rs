@@ -1,10 +1,13 @@
 #![doc = include_str!("../README.md")]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![no_std]
+
+extern crate alloc;
 
 mod raw;
 
-use std::fmt;
-use std::ops::Index;
+use core::fmt;
+use core::ops::Index;
 
 /// Creates a [`Vec`] containing the given elements.
 ///
