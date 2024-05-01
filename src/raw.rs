@@ -1,3 +1,5 @@
+#![allow(clippy::declare_interior_mutable_const)]
+
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::ops::Index;
@@ -26,6 +28,12 @@ unsafe impl<T: Send> Send for Vec<T> {}
 unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
+    pub const EMPTY: Vec<T> = Vec {
+        inflight: AtomicU64::new(0),
+        buckets: [Bucket::EMPTY; BUCKETS],
+        count: AtomicUsize::new(0),
+    };
+
     // Constructs a new, empty `Vec<T>` with the specified capacity.
     pub fn with_capacity(capacity: usize) -> Vec<T> {
         let init = match capacity {
@@ -34,15 +42,15 @@ impl<T> Vec<T> {
             n => Location::of(n).bucket,
         };
 
-        let mut buckets = [ptr::null_mut(); BUCKETS];
+        let mut buckets = [Bucket::EMPTY; BUCKETS];
 
         for (i, bucket) in buckets[..=init].iter_mut().enumerate() {
             let len = Location::bucket_len(i);
-            *bucket = Bucket::alloc(len);
+            *bucket = Bucket::from_ptr(Bucket::alloc(len));
         }
 
         Vec {
-            buckets: buckets.map(Bucket::new),
+            buckets,
             inflight: AtomicU64::new(0),
             count: AtomicUsize::new(0),
         }
@@ -371,12 +379,22 @@ struct Bucket<T> {
     entries: AtomicPtr<Entry<T>>,
 }
 
+impl<T> Bucket<T> {
+    const EMPTY: Bucket<T> = Bucket::from_ptr(ptr::null_mut());
+}
+
 struct Entry<T> {
     slot: UnsafeCell<MaybeUninit<T>>,
     active: AtomicBool,
 }
 
 impl<T> Bucket<T> {
+    const fn from_ptr(entries: *mut Entry<T>) -> Bucket<T> {
+        Bucket {
+            entries: AtomicPtr::new(entries),
+        }
+    }
+
     fn alloc(len: usize) -> *mut Entry<T> {
         let entries = (0..len)
             .map(|_| Entry::<T> {
@@ -390,12 +408,6 @@ impl<T> Bucket<T> {
 
     unsafe fn dealloc(entries: *mut Entry<T>, len: usize) {
         unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(entries, len))) }
-    }
-
-    fn new(entries: *mut Entry<T>) -> Bucket<T> {
-        Bucket {
-            entries: AtomicPtr::new(entries),
-        }
     }
 }
 

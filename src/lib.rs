@@ -73,8 +73,10 @@ impl<T> Vec<T> {
     /// ```
     /// let vec: boxcar::Vec<i32> = boxcar::Vec::new();
     /// ```
-    pub fn new() -> Vec<T> {
-        Vec::with_capacity(0)
+    pub const fn new() -> Vec<T> {
+        Vec {
+            raw: raw::Vec::EMPTY,
+        }
     }
 
     /// Constructs a new, empty `Vec<T>` with the specified capacity.
