@@ -1,14 +1,14 @@
 # `boxcar`
 
-[![Crate](https://img.shields.io/crates/v/boxcar?style=for-the-badge)](https://crates.io/crates/boxcar)
-[![Github](https://img.shields.io/badge/github-boxcar-success?style=for-the-badge)](https://github.com/ibraheemdev/boxcar)
-[![Docs](https://img.shields.io/badge/docs.rs-0.2.5-4d76ae?style=for-the-badge)](https://docs.rs/boxcar)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/boxcar?style=for-the-badge" height="25">](https://crates.io/crates/boxcar)
+[<img alt="github" src="https://img.shields.io/badge/github-boxcar-blue?style=for-the-badge" height="25">](https://github.com/ibraheemdev/boxcar)
+[<img alt="docs.rs" src="https://img.shields.io/docsrs/boxcar?style=for-the-badge" height="25">](https://docs.rs/boxcar)
 
 A concurrent, append-only vector.
 
 The vector provided by this crate suports concurrent `get` and `push` operations. All operations are lock-free.
 
-# Examples
+## Examples
 
 Appending an element to a vector and retrieving it:
 
