@@ -11,6 +11,12 @@ repository = "https://github.com/ibraheemdev/boxcar"
 
 keywords = ["concurrent","vector","lock-free"]
 categories = ["concurrency", "data-structures"]
+exclude = [
+  ".gitignore",
+  ".github/**",
+  "benches/**",
+  "report.svg",
+]
 
 [[bench]]
 name = "bench"
