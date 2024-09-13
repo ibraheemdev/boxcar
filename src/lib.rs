@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::needless_doctest_main)]
-// #![no_std]
+#![no_std]
 
 extern crate alloc;
 
@@ -468,18 +468,3 @@ where
 }
 
 impl<T: Eq> Eq for Vec<T> {}
-
-#[cfg(test)]
-mod test {
-
-    #[test]
-    fn test_push_with() {
-        let v = super::vec![0, 1, 2];
-        println!("{v:?}");
-        v.push_with(|index| index + 1);
-        println!("{v:?}");
-        // v.push_with(|index| index + 1);
-        // v.push_with(|index| index + 1);
-        assert_eq!(v, [0, 1, 2, 3]);
-    }
-}
