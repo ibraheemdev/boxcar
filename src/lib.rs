@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::needless_doctest_main)]
-#![no_std]
+// #![no_std]
 
 extern crate alloc;
 
@@ -140,6 +140,23 @@ impl<T> Vec<T> {
     /// ```
     pub fn push(&self, value: T) -> usize {
         self.raw.push(value)
+    }
+
+    /// Appends the element returned from the closure `f` to the back of the vector
+    /// at the index supplied to the closure.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec = boxcar::vec![0, 1];
+    /// vec.push_with(|index| index + 1);
+    /// assert_eq!(vec, [0, 1, 2]);
+    /// ```
+    pub fn push_with<F>(&self, f: F) -> usize
+    where
+        F: Fn(usize) -> T,
+    {
+        self.raw.push_with(f)
     }
 
     /// Returns the number of elements in the vector.
@@ -451,3 +468,18 @@ where
 }
 
 impl<T: Eq> Eq for Vec<T> {}
+
+#[cfg(test)]
+mod test {
+
+    #[test]
+    fn test_push_with() {
+        let v = super::vec![0, 1, 2];
+        println!("{v:?}");
+        v.push_with(|index| index + 1);
+        println!("{v:?}");
+        // v.push_with(|index| index + 1);
+        // v.push_with(|index| index + 1);
+        assert_eq!(v, [0, 1, 2, 3]);
+    }
+}

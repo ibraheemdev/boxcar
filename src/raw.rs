@@ -161,13 +161,34 @@ impl<T> Vec<T> {
         }
     }
 
+    /// Appends an element returned from the closure to the back of the vector
+    /// at the index represented by the `usize` passed to closure.
+    ///
+    /// This allows for use of the would-be index to be utilized within the
+    /// element.
+    pub fn push_with<F>(&self, f: F) -> usize
+    where
+        F: FnOnce(usize) -> T,
+    {
+        let index = self.next_index();
+        let value = f(index);
+        self.push_to(index, value)
+    }
+
     // Appends an element to the back of the vector.
     pub fn push(&self, value: T) -> usize {
+        self.push_to(self.next_index(), value)
+    }
+
+    fn next_index(&self) -> usize {
         let index = self.inflight.fetch_add(1, Ordering::Relaxed);
         // the inflight counter is a `u64` to catch overflows of the vector'scapacity
         let index: usize = index.try_into().expect("overflowed maximum capacity");
-        let location = Location::of(index);
+        index
+    }
 
+    fn push_to(&self, index: usize, value: T) -> usize {
+        let location = Location::of(index);
         // eagerly allocate the next bucket if we are close to the end of this one
         if index == (location.bucket_len - (location.bucket_len >> 3)) {
             if let Some(next_bucket) = self.buckets.get(location.bucket + 1) {
