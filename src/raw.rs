@@ -183,8 +183,7 @@ impl<T> Vec<T> {
     fn next_index(&self) -> usize {
         let index = self.inflight.fetch_add(1, Ordering::Relaxed);
         // the inflight counter is a `u64` to catch overflows of the vector'scapacity
-        let index: usize = index.try_into().expect("overflowed maximum capacity");
-        index
+        index.try_into().expect("overflowed maximum capacity")
     }
 
     fn push_to(&self, index: usize, value: T) -> usize {
