@@ -145,6 +145,7 @@ impl<T> Vec<T> {
     /// Appends the element returned from the closure `f` to the back of the vector
     /// at the index supplied to the closure.
     ///
+    /// Returns the index that the element was inserted into.
     /// # Examples
     ///
     /// ```
