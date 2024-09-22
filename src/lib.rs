@@ -406,7 +406,7 @@ impl<T: Clone> Clone for Vec<T> {
 
 impl<T: fmt::Debug> fmt::Debug for Vec<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.iter()).finish()
+        f.debug_list().entries(self.iter().map(|(_, v)| v)).finish()
     }
 }
 
