@@ -150,7 +150,7 @@ impl<T> Vec<T> {
     ///
     /// ```
     /// let vec = boxcar::vec![0, 1];
-    /// vec.push_with(|index| index + 1);
+    /// vec.push_with(|index| index);
     /// assert_eq!(vec, [0, 1, 2]);
     /// ```
     pub fn push_with<F>(&self, f: F) -> usize

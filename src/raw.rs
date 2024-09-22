@@ -171,7 +171,7 @@ impl<T> Vec<T> {
         F: FnOnce(usize) -> T,
     {
         let index = self.next_index();
-        let value = f(index - 1);
+        let value = f(index);
         self.push_to(index, value)
     }
 
