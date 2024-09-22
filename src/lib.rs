@@ -142,6 +142,24 @@ impl<T> Vec<T> {
         self.raw.push(value)
     }
 
+    /// Appends the element returned from the closure `f` to the back of the vector
+    /// at the index supplied to the closure.
+    ///
+    /// Returns the index that the element was inserted into.
+    /// # Examples
+    ///
+    /// ```
+    /// let vec = boxcar::vec![0, 1];
+    /// vec.push_with(|index| index);
+    /// assert_eq!(vec, [0, 1, 2]);
+    /// ```
+    pub fn push_with<F>(&self, f: F) -> usize
+    where
+        F: Fn(usize) -> T,
+    {
+        self.raw.push_with(f)
+    }
+
     /// Returns the number of elements in the vector.
     ///
     /// Note that due to concurrent writes, it is not guaranteed
