@@ -14,7 +14,6 @@ categories = ["concurrency", "data-structures"]
 exclude = [
   ".gitignore",
   ".github/**",
-  "benches/**",
   "report.svg",
 ]
 
