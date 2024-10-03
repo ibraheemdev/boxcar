@@ -341,7 +341,8 @@ impl<T> Iterator for IntoIter<T> {
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.raw.yielded(), Some(self.raw.yielded()))
+        let remaining = self.vec.count() - self.raw.yielded();
+        (remaining, Some(remaining))
     }
 }
 
