@@ -432,8 +432,8 @@ pub struct Iter {
 }
 
 impl Iter {
-    /// Returns a reference to the next entry in the iterator.
-    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v Entry<T>)> {
+    /// Returns a pointer to the next entry in the iterator.
+    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, *mut Entry<T>)> {
         // We returned every entry in the vector, we're done.
         if self.yielded == vec.count() {
             return None;
@@ -458,7 +458,7 @@ impl Iter {
             if !entries.is_null() {
                 while self.location.entry < self.location.bucket_len {
                     // Safety: Bounds checked above.
-                    let entry = unsafe { &*entries.add(self.location.entry) };
+                    let entry = unsafe { entries.add(self.location.entry) };
                     let index = self.index;
 
                     self.location.entry += 1;
@@ -466,7 +466,7 @@ impl Iter {
 
                     // Continue even after we find an uninitialized entry for the same
                     // reason as uninitialized buckets.
-                    if entry.active.load(Ordering::Acquire) {
+                    if unsafe { (*entry).active.load(Ordering::Acquire) } {
                         self.yielded += 1;
                         return Some((index, entry));
                     }
@@ -487,17 +487,18 @@ impl Iter {
     /// Returns a shared reference to the next entry in the iterator.
     pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v T)> {
         self.next(vec)
-            .map(|(index, entry)| (index, unsafe { entry.value_unchecked() }))
+            .map(|(index, entry)| (index, unsafe { (*entry).value_unchecked() }))
     }
 
     /// Returns an owned reference to the next entry in the iterator.
     pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
-        self.next(vec).map(|(_, entry)| unsafe {
-            entry.active.store(false, Ordering::Relaxed);
+        self.next(vec).map(|(_, entry)| {
+            // Safety: We have `&mut Vec`.
+            let entry = unsafe { &mut *entry };
+            *entry.active.get_mut() = false;
 
             // Safety: `Iter::next` only yields initialized entries.
-            let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());
-            value.assume_init()
+            unsafe { mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit()).assume_init() }
         })
     }
 
