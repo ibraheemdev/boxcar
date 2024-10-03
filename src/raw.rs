@@ -433,7 +433,7 @@ pub struct Iter {
 
 impl Iter {
     /// Returns a pointer to the next entry in the iterator.
-    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, *mut Entry<T>)> {
+    fn next<T>(&mut self, vec: &Vec<T>) -> Option<(usize, *mut Entry<T>)> {
         // We returned every entry in the vector, we're done.
         if self.yielded == vec.count() {
             return None;
