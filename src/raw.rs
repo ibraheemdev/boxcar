@@ -13,14 +13,14 @@ const MAX_ENTRIES: usize = usize::MAX - SKIP;
 
 // A lock-free, append-only vector.
 pub struct Vec<T> {
-    // a counter used to retrieve a unique index to push to.
+    // A counter used to retrieve a unique index to push to.
     //
-    // this value may be more than the true length as it will
+    // This value may be more than the true length as it will
     // be incremented before values are actually stored.
     inflight: AtomicU64,
-    // buckets of length 32, 64 .. 2^63
+    // Buckets of length 32, 64 .. 2^63.
     buckets: [Bucket<T>; BUCKETS],
-    // the number of initialized elements in this vector
+    // The number of initialized elements in this vector.
     count: AtomicUsize,
 }
 
@@ -34,18 +34,18 @@ impl<T> Vec<T> {
         count: AtomicUsize::new(0),
     };
 
-    // Constructs a new, empty `Vec<T>` with the specified capacity.
+    /// Constructs a new, empty `Vec<T>` with the specified capacity.
     pub fn with_capacity(capacity: usize) -> Vec<T> {
         let init = match capacity {
             0 => 0,
-            // initialize enough buckets for `capacity` elements
+            // Initialize enough buckets for `capacity` elements.
             n => Location::of(n).bucket,
         };
 
         let mut buckets = [Bucket::EMPTY; BUCKETS];
 
         for (i, bucket) in buckets[..=init].iter_mut().enumerate() {
-            let len = Location::bucket_len(i);
+            let len = Location::bucket_capacity(i);
             *bucket = Bucket::from_ptr(Bucket::alloc(len));
         }
 
@@ -56,16 +56,16 @@ impl<T> Vec<T> {
         }
     }
 
-    // Returns the number of elements in the vector.
+    /// Returns the number of elements in the vector.
     pub fn count(&self) -> usize {
         self.count.load(Ordering::Acquire)
     }
 
-    // Returns a reference to the element at the given index.
+    /// Returns a reference to the element at the given index.
     pub fn get(&self, index: usize) -> Option<&T> {
         let location = Location::of(index);
 
-        // safety: `location.bucket` is always in bounds
+        // Safety: `location.bucket` is always in bounds.
         let entries = unsafe {
             self.buckets
                 .get_unchecked(location.bucket)
@@ -73,32 +73,32 @@ impl<T> Vec<T> {
                 .load(Ordering::Acquire)
         };
 
-        // bucket is uninitialized
+        // The bucket is uninitialized.
         if entries.is_null() {
             return None;
         }
 
-        // safety: `location.entry` is always in bounds for it's bucket
+        // Safety: `location.entry` is always in bounds for it's bucket.
         let entry = unsafe { &*entries.add(location.entry) };
 
         if entry.active.load(Ordering::Acquire) {
-            // safety: the entry is active
+            // Safety: The entry is active.
             unsafe { return Some(entry.value_unchecked()) }
         }
 
-        // entry is uninitialized
+        // The entry is uninitialized.
         None
     }
 
-    // Returns a reference to the element at the given index.
-    //
-    // # Safety
-    //
-    // Entry at `index` must be initialized.
+    /// Returns a reference to the element at the given index.
+    ///
+    /// # Safety
+    ///
+    /// Entry at `index` must be initialized.
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         let location = Location::of(index);
 
-        // safety: caller guarantees the entry is initialized
+        // Safety: Caller guarantees the entry is initialized.
         unsafe {
             let entry = self
                 .buckets
@@ -111,11 +111,11 @@ impl<T> Vec<T> {
         }
     }
 
-    // Returns a mutable reference to the element at the given index.
+    /// Returns a mutable reference to the element at the given index.
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         let location = Location::of(index);
 
-        // safety: `location.bucket` is always in bounds
+        // Safety: `location.bucket` is always in bounds.
         let entries = unsafe {
             self.buckets
                 .get_unchecked_mut(location.bucket)
@@ -123,12 +123,12 @@ impl<T> Vec<T> {
                 .get_mut()
         };
 
-        // bucket is uninitialized
+        // The bucket is uninitialized.
         if entries.is_null() {
             return None;
         }
 
-        // safety: `location.entry` is always in bounds for it's bucket
+        // Safety: `location.entry` is always in bounds for it's bucket.
         let entry = unsafe { &mut *entries.add(location.entry) };
 
         if *entry.active.get_mut() {
@@ -136,19 +136,19 @@ impl<T> Vec<T> {
             unsafe { return Some(entry.value_unchecked_mut()) }
         }
 
-        // entry is uninitialized
+        // The entry is uninitialized.
         None
     }
 
-    // Returns a mutable reference to the element at the given index.
-    //
-    // # Safety
-    //
-    // Entry at `index` must be initialized.
+    /// Returns a mutable reference to the element at the given index.
+    ///
+    /// # Safety
+    ///
+    /// Entry at `index` must be initialized.
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
         let location = Location::of(index);
 
-        // safety: caller guarantees the entry is initialized
+        // Safety: caller guarantees the entry is initialized.
         unsafe {
             let entry = self
                 .buckets
@@ -159,6 +159,14 @@ impl<T> Vec<T> {
 
             (*entry).value_unchecked_mut()
         }
+    }
+
+    /// Returns a unique index for insertion.
+    fn next_index(&self) -> usize {
+        let index = self.inflight.fetch_add(1, Ordering::Relaxed);
+
+        // The inflight counter is a `u64` to catch overflows of the vector's capacity.
+        index.try_into().expect("overflowed maximum capacity")
     }
 
     /// Appends an element returned from the closure to the back of the vector
@@ -172,63 +180,63 @@ impl<T> Vec<T> {
     {
         let index = self.next_index();
         let value = f(index);
-        self.push_to(index, value)
+        self.write(index, value)
     }
 
-    // Appends an element to the back of the vector.
+    /// Appends an element to the back of the vector.
     pub fn push(&self, value: T) -> usize {
-        self.push_to(self.next_index(), value)
+        self.write(self.next_index(), value)
     }
 
-    fn next_index(&self) -> usize {
-        let index = self.inflight.fetch_add(1, Ordering::Relaxed);
-        // the inflight counter is a `u64` to catch overflows of the vector'scapacity
-        index.try_into().expect("overflowed maximum capacity")
-    }
-
-    fn push_to(&self, index: usize, value: T) -> usize {
+    /// Write an element at the given index.
+    fn write(&self, index: usize, value: T) -> usize {
         let location = Location::of(index);
-        // eagerly allocate the next bucket if we are close to the end of this one
+
+        // Eagerly allocate the next bucket if we are close to the end of this one.
         if index == (location.bucket_len - (location.bucket_len >> 3)) {
             if let Some(next_bucket) = self.buckets.get(location.bucket + 1) {
                 Vec::get_or_alloc(next_bucket, location.bucket_len << 1);
             }
         }
 
-        // safety: `location.bucket` is always in bounds
+        // Safety: `location.bucket` is always in bounds.
         let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
         let mut entries = bucket.entries.load(Ordering::Acquire);
 
-        // the bucket has not been allocated yet
+        // The bucket has not been allocated yet.
         if entries.is_null() {
             entries = Vec::get_or_alloc(bucket, location.bucket_len);
         }
 
         unsafe {
-            // safety: `location.entry` is always in bounds for it's bucket
+            // Safety: `location.entry` is always in bounds for it's bucket.
             let entry = &*entries.add(location.entry);
 
-            // safety: we have unique access to this entry.
+            // Safety: We have unique access to this entry.
             //
-            // 1. it is impossible for another thread to attempt a `push`
-            // to this location as we retreived it from `inflight.fetch_add`
+            // 1. It is impossible for another thread to attempt a `push`
+            // to this location as we retrieved it from `next_index`.
             //
-            // 2. any thread trying to `get` this entry will see `active == false`,
-            // and will not try to access it
+            // 2. Any thread trying to `get` this entry will see `!active`
+            // and will not try to access it.
             entry.slot.get().write(MaybeUninit::new(value));
 
-            // let other threads know that this entry is active
+            // Let other threads know that this entry is active.
             entry.active.store(true, Ordering::Release);
         }
 
-        // increase the true count
+        // Increase the element count.
         self.count.fetch_add(1, Ordering::Release);
         index
     }
 
-    // race to intialize a bucket
+    // Race to intialize a bucket.
+    //
+    // Note that we avoid contention on bucket allocation by having a specified
+    // writer eagerly allocate the next bucket.
     fn get_or_alloc(bucket: &Bucket<T>, len: usize) -> *mut Entry<T> {
         let entries = Bucket::alloc(len);
+
         match bucket.entries.compare_exchange(
             ptr::null_mut(),
             entries,
@@ -243,39 +251,33 @@ impl<T> Vec<T> {
         }
     }
 
-    // Reserves capacity for at least `additional` more elements to be inserted
-    // in the given `Vec<T>`. The collection may reserve more space to avoid
-    // frequent reallocations.
+    // Reserves capacity for at least `additional` more elements to be inserted in
+    // the vector. The collection may reserve more space to avoid frequent reallocations.
     pub fn reserve(&self, additional: usize) {
         let len = self.count.load(Ordering::Acquire);
         let mut location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRIES));
 
-        // allocate buckets starting from the bucket at `len + additional` and
-        // working our way backwards
+        // Allocate buckets starting from the bucket at `len + additional` and
+        // working our way backwards.
         loop {
-            // safety: `location.bucket` is always in bounds
+            // Safety: `location.bucket` is always in bounds.
             let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
 
-            // reached an initalized bucket, we're done
-            if !bucket.entries.load(Ordering::Acquire).is_null() {
-                break;
-            }
-
-            // someone allocated before us
+            // Reached an initalized bucket, we're done.
             if !bucket.entries.load(Ordering::Relaxed).is_null() {
                 break;
             }
 
-            // allocate the bucket
+            // Allocate the bucket.
             Vec::get_or_alloc(bucket, location.bucket_len);
 
-            // reached the first bucket
+            // Reached the first bucket, we're done.
             if location.bucket == 0 {
                 break;
             }
 
             location.bucket -= 1;
-            location.bucket_len = Location::bucket_len(location.bucket);
+            location.bucket_len = Location::bucket_capacity(location.bucket);
         }
     }
 
@@ -287,7 +289,7 @@ impl<T> Vec<T> {
             location: Location {
                 bucket: 0,
                 entry: 0,
-                bucket_len: Location::bucket_len(0),
+                bucket_len: Location::bucket_capacity(0),
             },
         }
     }
@@ -310,91 +312,15 @@ impl<T> Drop for Vec<T> {
                 break;
             }
 
-            let len = Location::bucket_len(i);
-            // safety: in drop
+            let len = Location::bucket_capacity(i);
+
+            // Safety: We have `&mut self`.
             unsafe { Bucket::dealloc(entries, len) }
         }
     }
 }
 
-#[derive(Clone)]
-pub struct Iter {
-    location: Location,
-    yielded: usize,
-    index: usize,
-}
-
-impl Iter {
-    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v Entry<T>)> {
-        if self.yielded() == vec.count() {
-            return None;
-        }
-
-        // it is possible that the the length was incremented due to an element
-        // being stored in a bucket that we have already iterated over, so we
-        // still have to check that we are in bounds
-        while self.location.bucket < BUCKETS {
-            // safety: bounds checked above
-            let entries = unsafe {
-                vec.buckets
-                    .get_unchecked(self.location.bucket)
-                    .entries
-                    .load(Ordering::Acquire)
-            };
-
-            // just because this bucket is not initialized doesn't mean all
-            // subsequent buckets aren't. a push may have acquired an index
-            // in a new bucket before a previous push finished storing, so
-            // we have to continue checking every bucket until we yield
-            // `vec.count()` elements
-            if !entries.is_null() {
-                while self.location.entry < self.location.bucket_len {
-                    // safety: bounds checked above
-                    let entry = unsafe { &*entries.add(self.location.entry) };
-                    let index = self.index;
-
-                    self.location.entry += 1;
-                    self.index += 1;
-
-                    // we have to continue checking entries even after we find an
-                    // uninitialized one for the same reason as uninitialized buckets
-                    if entry.active.load(Ordering::Acquire) {
-                        self.yielded += 1;
-                        return Some((index, entry));
-                    }
-                }
-            }
-
-            self.location.entry = 0;
-            self.location.bucket += 1;
-
-            if self.location.bucket < BUCKETS {
-                self.location.bucket_len = Location::bucket_len(self.location.bucket);
-            }
-        }
-
-        None
-    }
-
-    pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v T)> {
-        self.next(vec)
-            .map(|(index, entry)| (index, unsafe { entry.value_unchecked() }))
-    }
-
-    pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
-        self.next(vec).map(|(_, entry)| unsafe {
-            entry.active.store(false, Ordering::Relaxed);
-            // safety: `next` only yields initialized entries
-            let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());
-            value.assume_init()
-        })
-    }
-
-    pub fn yielded(&self) -> usize {
-        self.yielded
-    }
-}
-
+/// A bucket of entries.
 struct Bucket<T> {
     entries: AtomicPtr<Entry<T>>,
 }
@@ -403,18 +329,21 @@ impl<T> Bucket<T> {
     const EMPTY: Bucket<T> = Bucket::from_ptr(ptr::null_mut());
 }
 
+/// A possibly uninitialized entry in the vector.
 struct Entry<T> {
     slot: UnsafeCell<MaybeUninit<T>>,
     active: AtomicBool,
 }
 
 impl<T> Bucket<T> {
+    /// Cast a pointer to an `Entry` to a bucket pointer.
     const fn from_ptr(entries: *mut Entry<T>) -> Bucket<T> {
         Bucket {
             entries: AtomicPtr::new(entries),
         }
     }
 
+    /// Allocate a bucket of the specified capacity.
     fn alloc(len: usize) -> *mut Entry<T> {
         let entries = (0..len)
             .map(|_| Entry::<T> {
@@ -426,6 +355,7 @@ impl<T> Bucket<T> {
         Box::into_raw(entries) as _
     }
 
+    /// Deallocate a bucket of the specified capacity.
     unsafe fn dealloc(entries: *mut Entry<T>, len: usize) {
         unsafe { drop(Box::from_raw(slice::from_raw_parts_mut(entries, len))) }
     }
@@ -434,17 +364,17 @@ impl<T> Bucket<T> {
 impl<T> Entry<T> {
     // # Safety
     //
-    // Value must be initialized.
+    // The value must be initialized.
     unsafe fn value_unchecked(&self) -> &T {
-        // safety: guaranteed by caller
+        // Safety: Guaranteed by caller.
         unsafe { (*self.slot.get()).assume_init_ref() }
     }
 
     // # Safety
     //
-    // Value must be initialized.
+    // The value must be initialized.
     unsafe fn value_unchecked_mut(&mut self) -> &mut T {
-        // safety: guaranteed by caller
+        // Safety: Guaranteed by caller.
         unsafe { self.slot.get_mut().assume_init_mut() }
     }
 }
@@ -459,25 +389,25 @@ impl<T> Drop for Entry<T> {
 
 #[derive(Debug, Clone)]
 struct Location {
-    // the index of the bucket
+    // The index of the bucket.
     bucket: usize,
-    // the length of `bucket`
+    // The length of `bucket`.
     bucket_len: usize,
-    // the index of the entry in `bucket`
+    // The index of the entry in the bucket.
     entry: usize,
 }
 
-// skip the shorter buckets to avoid unnecessary allocations.
-// this also reduces the maximum capacity of a vector.
+// Skip shorter buckets to avoid unnecessary allocations.
 const SKIP: usize = 32;
 const SKIP_BUCKET: usize = ((usize::BITS - SKIP.leading_zeros()) as usize) - 1;
 
 impl Location {
+    /// Returns the location of a given entry in a vector.
     fn of(index: usize) -> Location {
         let skipped = index.checked_add(SKIP).expect("exceeded maximum length");
         let bucket = usize::BITS - skipped.leading_zeros();
         let bucket = (bucket as usize) - (SKIP_BUCKET + 1);
-        let bucket_len = Location::bucket_len(bucket);
+        let bucket_len = Location::bucket_capacity(bucket);
         let entry = skipped ^ bucket_len;
 
         Location {
@@ -487,18 +417,102 @@ impl Location {
         }
     }
 
-    fn bucket_len(bucket: usize) -> usize {
+    /// Returns the capacity of the bucket at the given index.
+    fn bucket_capacity(bucket: usize) -> usize {
         1 << (bucket + SKIP_BUCKET)
     }
 }
 
+/// An iterator over the elements of a [`Vec<T>`].
+#[derive(Clone)]
+pub struct Iter {
+    location: Location,
+    yielded: usize,
+    index: usize,
+}
+
+impl Iter {
+    /// Returns a reference to the next entry in the iterator.
+    fn next<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v Entry<T>)> {
+        // We returned every entry in the vector, we're done.
+        if self.yielded == vec.count() {
+            return None;
+        }
+
+        // It is possible that the the length was incremented due to an element
+        // being stored in a bucket that we have already iterated over, so we
+        // still have to check that we are in bounds.
+        while self.location.bucket < BUCKETS {
+            // Safety: Bounds checked above.
+            let entries = unsafe {
+                vec.buckets
+                    .get_unchecked(self.location.bucket)
+                    .entries
+                    .load(Ordering::Acquire)
+            };
+
+            // Despite this bucket not being initialized, it is possible, but rare,
+            // that a subsequent bucket was initialized before this one. Thus we
+            // have to continue checking every bucket until we yield `vec.count()`
+            // elements.
+            if !entries.is_null() {
+                while self.location.entry < self.location.bucket_len {
+                    // Safety: Bounds checked above.
+                    let entry = unsafe { &*entries.add(self.location.entry) };
+                    let index = self.index;
+
+                    self.location.entry += 1;
+                    self.index += 1;
+
+                    // Continue even after we find an uninitialized entry for the same
+                    // reason as uninitialized buckets.
+                    if entry.active.load(Ordering::Acquire) {
+                        self.yielded += 1;
+                        return Some((index, entry));
+                    }
+                }
+            }
+
+            self.location.entry = 0;
+            self.location.bucket += 1;
+
+            if self.location.bucket < BUCKETS {
+                self.location.bucket_len = Location::bucket_capacity(self.location.bucket);
+            }
+        }
+
+        None
+    }
+
+    /// Returns a shared reference to the next entry in the iterator.
+    pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v T)> {
+        self.next(vec)
+            .map(|(index, entry)| (index, unsafe { entry.value_unchecked() }))
+    }
+
+    /// Returns an owned reference to the next entry in the iterator.
+    pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
+        self.next(vec).map(|(_, entry)| unsafe {
+            entry.active.store(false, Ordering::Relaxed);
+
+            // Safety: `Iter::next` only yields initialized entries.
+            let value = mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit());
+            value.assume_init()
+        })
+    }
+
+    /// Returns the number of elements that have been yielded by this iterator.
+    pub fn yielded(&self) -> usize {
+        self.yielded
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn location() {
-        assert_eq!(Location::bucket_len(0), 32);
+        assert_eq!(Location::bucket_capacity(0), 32);
         for i in 0..32 {
             let loc = Location::of(i);
             assert_eq!(loc.bucket_len, 32);
@@ -506,7 +520,7 @@ mod tests {
             assert_eq!(loc.entry, i);
         }
 
-        assert_eq!(Location::bucket_len(1), 64);
+        assert_eq!(Location::bucket_capacity(1), 64);
         for i in 33..96 {
             let loc = Location::of(i);
             assert_eq!(loc.bucket_len, 64);
@@ -514,7 +528,7 @@ mod tests {
             assert_eq!(loc.entry, i - 32);
         }
 
-        assert_eq!(Location::bucket_len(2), 128);
+        assert_eq!(Location::bucket_capacity(2), 128);
         for i in 96..224 {
             let loc = Location::of(i);
             assert_eq!(loc.bucket_len, 128);

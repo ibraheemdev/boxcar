@@ -242,7 +242,7 @@ impl<T> Vec<T> {
     /// }
     /// ```
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
-        // SAFETY: guaranteed by caller
+        // Safety: Guaranteed by caller.
         unsafe { self.raw.get_unchecked(index) }
     }
 
@@ -266,7 +266,7 @@ impl<T> Vec<T> {
     /// }
     /// ```
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
-        // SAFETY: guaranteed by caller
+        // Safety: Guaranteed by caller.
         unsafe { self.raw.get_unchecked_mut(index) }
     }
 
@@ -361,6 +361,7 @@ impl<'a, T> Clone for Iter<'a, T> {
         }
     }
 }
+
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = (usize, &'a T);
 
@@ -372,9 +373,11 @@ impl<'a, T> Iterator for Iter<'a, T> {
         (self.vec.count() - self.raw.yielded(), None)
     }
 }
+
 impl<'a, T: fmt::Debug> fmt::Debug for Iter<'a, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct Contents<'a, T>(&'a T);
+
         impl<T> fmt::Debug for Contents<'_, T>
         where
             T: Iterator + Clone,
@@ -384,6 +387,7 @@ impl<'a, T: fmt::Debug> fmt::Debug for Iter<'a, T> {
                 f.debug_list().entries(self.0.clone()).finish()
             }
         }
+
         f.debug_tuple("Iter").field(&Contents(self)).finish()
     }
 }
@@ -434,7 +438,7 @@ impl<T: PartialEq> PartialEq for Vec<T> {
             return false;
         }
 
-        // ensure indexes are checked along with values to handle gaps in the vector
+        // Ensure indexes are checked along with values to handle gaps in the vector.
         for (index, value) in self.iter() {
             if other.get(index) != Some(value) {
                 return false;
@@ -457,7 +461,7 @@ where
             return false;
         }
 
-        // ensure indexes are checked along with values to handle gaps in the vector
+        // Ensure indexes are checked along with values to handle gaps in the vector.
         for (index, value) in self.iter() {
             if other.get(index) != Some(value) {
                 return false;
