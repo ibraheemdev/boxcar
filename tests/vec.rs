@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{sync::Barrier, thread};
 
 #[test]
@@ -19,6 +20,41 @@ fn simple() {
     for (i, x) in vec.into_iter().enumerate() {
         assert_eq!(i, x);
     }
+}
+
+#[test]
+fn clear() {
+    struct T<'a>(&'a AtomicUsize);
+    impl Drop for T<'_> {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    let drops = AtomicUsize::new(0);
+
+    let mut vec = boxcar::Vec::new();
+    vec.push(T(&drops));
+    vec.push(T(&drops));
+
+    let first_ptr: *const _ = vec.iter().next().unwrap().1 as _;
+
+    vec.clear();
+    assert_eq!(vec.count(), 0);
+    assert_eq!(vec.iter().count(), 0);
+    assert_eq!(drops.swap(0, Ordering::Relaxed), 2);
+
+    vec.clear();
+    assert_eq!(vec.count(), 0);
+    assert_eq!(vec.iter().count(), 0);
+    assert_eq!(drops.load(Ordering::Relaxed), 0);
+
+    vec.push(T(&drops));
+    let ptr: *const _ = vec.iter().next().unwrap().1 as _;
+    assert_eq!(ptr, first_ptr);
+
+    drop(vec);
+    assert_eq!(drops.load(Ordering::Relaxed), 1);
 }
 
 #[test]
