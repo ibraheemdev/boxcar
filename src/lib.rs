@@ -104,6 +104,23 @@ impl<T> Vec<T> {
         }
     }
 
+    /// Creates a new `Vec<T>` reusing allocated space from the `self`.
+    ///
+    /// # Examples
+    /// ```
+    /// let vec = boxcar::Vec::new();
+    /// vec.push(1);
+    /// vec.push(2);
+    ///
+    /// let mut vec = vec;
+    /// vec.clear();
+    /// assert_eq!(vec.count(), 0);
+    /// vec.push(3); // will not allocate
+    /// ```
+    pub fn clear(&mut self) {
+        self.raw.clear();
+    }
+
     /// Reserves capacity for at least `additional` more elements to be inserted
     /// in the given `Vec<T>`. The collection may reserve more space to avoid
     /// frequent reallocations.
