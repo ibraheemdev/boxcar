@@ -57,23 +57,14 @@ impl<T> Vec<T> {
     }
 
     pub fn clear(&mut self) {
+        let mut iter = self.iter();
+
+        // Consume and reset every entry in the vector.
+        while iter.next_owned(self).is_some() {}
+
+        // Reset the count.
         self.count.store(0, Ordering::Relaxed);
         self.inflight.store(0, Ordering::Relaxed);
-
-        for (i, b) in self.buckets.iter_mut().enumerate() {
-            let e = b.entries.load(Ordering::Relaxed);
-            if e.is_null() {
-                continue;
-            }
-
-            let len = Location::bucket_capacity(i);
-            for i in 0..len {
-                let e = unsafe { &mut *e.add(i) };
-                if e.active.swap(false, Ordering::Relaxed) {
-                    unsafe { ptr::drop_in_place((*e.slot.get()).as_mut_ptr()) }
-                }
-            }
-        }
     }
 
     /// Returns the number of elements in the vector.
@@ -510,10 +501,11 @@ impl Iter {
             .map(|(index, entry)| (index, unsafe { (*entry).value_unchecked() }))
     }
 
-    /// Returns an owned reference to the next entry in the iterator.
-    pub unsafe fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
+    /// Returns an owned reference to the next entry in the iterator, resetting the entry in
+    /// the vector.
+    pub fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
         self.next(vec).map(|(_, entry)| {
-            // Safety: We have `&mut Vec`.
+            // Safety: We have `&mut Vec<T>`.
             let entry = unsafe { &mut *entry };
             *entry.active.get_mut() = false;
 

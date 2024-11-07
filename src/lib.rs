@@ -357,7 +357,7 @@ impl<T> Iterator for IntoIter<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        unsafe { self.raw.next_owned(&mut self.vec) }
+        self.raw.next_owned(&mut self.vec)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
