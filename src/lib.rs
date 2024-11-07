@@ -104,18 +104,21 @@ impl<T> Vec<T> {
         }
     }
 
-    /// Creates a new `Vec<T>` reusing allocated space from the `self`.
+    /// Clears the vector, removing all values.
+    ///
+    /// Note that this method has no effect on the allocated capacity
+    /// of the vector.ace from the `self`.
     ///
     /// # Examples
     /// ```
-    /// let vec = boxcar::Vec::new();
+    /// let mut vec = boxcar::Vec::new();
     /// vec.push(1);
     /// vec.push(2);
     ///
-    /// let mut vec = vec;
     /// vec.clear();
-    /// assert_eq!(vec.count(), 0);
-    /// vec.push(3); // will not allocate
+    /// assert!(vec.is_empty());
+    ///
+    /// vec.push(3); // Will not allocate.
     /// ```
     pub fn clear(&mut self) {
         self.raw.clear();
