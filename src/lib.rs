@@ -107,7 +107,7 @@ impl<T> Vec<T> {
     /// Clears the vector, removing all values.
     ///
     /// Note that this method has no effect on the allocated capacity
-    /// of the vector.ace from the `self`.
+    /// of the vector.
     ///
     /// # Examples
     /// ```
