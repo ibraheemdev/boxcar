@@ -395,7 +395,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T: fmt::Debug> fmt::Debug for Iter<'a, T> {
+impl<T: fmt::Debug> fmt::Debug for Iter<'_, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         struct Contents<'a, T>(&'a T);
 
