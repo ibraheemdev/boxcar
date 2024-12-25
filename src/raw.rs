@@ -3,8 +3,9 @@
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::ops::Index;
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize};
 use core::{ptr, slice};
+use portable_atomic::{AtomicU64, Ordering};
 
 use alloc::boxed::Box;
 
