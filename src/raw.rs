@@ -3,7 +3,7 @@
 use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::ops::Index;
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU64, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use core::{ptr, slice};
 
 use alloc::boxed::Box;
@@ -11,13 +11,19 @@ use alloc::boxed::Box;
 const BUCKETS: usize = (usize::BITS as usize) - SKIP_BUCKET;
 const MAX_ENTRY: usize = usize::MAX - SKIP;
 
+#[cfg(target_has_atomic = "64")]
+type Inflight = core::sync::atomic::AtomicU64;
+
+#[cfg(not(target_has_atomic = "64"))]
+type Inflight = core::sync::atomic::AtomicUsize;
+
 // A lock-free, append-only vector.
 pub struct Vec<T> {
     // A counter used to retrieve a unique index to push to.
     //
     // This value may be more than the true length as it will
     // be incremented before values are actually stored.
-    inflight: AtomicU64,
+    inflight: Inflight,
 
     // Buckets of length 32, 64 .. 2^63.
     buckets: [Bucket<T>; BUCKETS],
@@ -31,7 +37,7 @@ unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
     pub const EMPTY: Vec<T> = Vec {
-        inflight: AtomicU64::new(0),
+        inflight: Inflight::new(0),
         buckets: [Bucket::EMPTY; BUCKETS],
         count: AtomicUsize::new(0),
     };
@@ -53,7 +59,7 @@ impl<T> Vec<T> {
 
         Vec {
             buckets,
-            inflight: AtomicU64::new(0),
+            inflight: Inflight::new(0),
             count: AtomicUsize::new(0),
         }
     }
@@ -165,14 +171,24 @@ impl<T> Vec<T> {
 
     /// Returns a unique index for insertion.
     fn next_index(&self) -> usize {
-        let index = self.inflight.fetch_add(1, Ordering::Relaxed);
-
-        // The inflight counter is a `u64` to catch overflows of the vector's capacity.
-        if index > (MAX_ENTRY as u64) {
-            panic!("capacity overflow");
+        #[cfg(target_has_atomic = "64")]
+        {
+            // The inflight counter is an `AtomicU64`, allowing it to catch capacity overflow.
+            let index = self.inflight.fetch_add(1, Ordering::Relaxed);
+            assert!(index <= (MAX_ENTRY as u64), "capacity overflow");
+            index as usize
         }
 
-        index as usize
+        #[cfg(not(target_has_atomic = "64"))]
+        {
+            // We must use a CAS loop to avoid wrapping on overflow.
+            self.inflight
+                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |index| {
+                    assert!(index <= MAX_ENTRY, "capacity overflow");
+                    Some(index + 1)
+                })
+                .unwrap()
+        }
     }
 
     /// Appends an element returned from the closure to the back of the vector
@@ -591,7 +607,7 @@ mod tests {
 
         let max = Location::of(MAX_ENTRY);
         assert_eq!(max.bucket, BUCKETS - 1);
-        assert_eq!(max.bucket_len, 1 << 63);
-        assert_eq!(max.entry, (1 << 63) - 1);
+        assert_eq!(max.bucket_len, 1 << (usize::BITS - 1));
+        assert_eq!(max.entry, (1 << (usize::BITS - 1)) - 1);
     }
 }
