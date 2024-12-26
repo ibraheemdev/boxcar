@@ -9,7 +9,7 @@ use core::{ptr, slice};
 use alloc::boxed::Box;
 
 const BUCKETS: usize = (usize::BITS as usize) - SKIP_BUCKET;
-const MAX_ENTRIES: usize = usize::MAX - SKIP;
+const MAX_ENTRY: usize = usize::MAX - SKIP;
 
 // A lock-free, append-only vector.
 pub struct Vec<T> {
@@ -18,8 +18,10 @@ pub struct Vec<T> {
     // This value may be more than the true length as it will
     // be incremented before values are actually stored.
     inflight: AtomicU64,
+
     // Buckets of length 32, 64 .. 2^63.
     buckets: [Bucket<T>; BUCKETS],
+
     // The number of initialized elements in this vector.
     count: AtomicUsize,
 }
@@ -56,17 +58,6 @@ impl<T> Vec<T> {
         }
     }
 
-    pub fn clear(&mut self) {
-        let mut iter = self.iter();
-
-        // Consume and reset every entry in the vector.
-        while iter.next_owned(self).is_some() {}
-
-        // Reset the count.
-        self.count.store(0, Ordering::Relaxed);
-        self.inflight.store(0, Ordering::Relaxed);
-    }
-
     /// Returns the number of elements in the vector.
     pub fn count(&self) -> usize {
         self.count.load(Ordering::Acquire)
@@ -89,7 +80,7 @@ impl<T> Vec<T> {
             return None;
         }
 
-        // Safety: `location.entry` is always in bounds for it's bucket.
+        // Safety: `location.entry` is always in bounds for its bucket.
         let entry = unsafe { &*entries.add(location.entry) };
 
         if entry.active.load(Ordering::Acquire) {
@@ -107,10 +98,10 @@ impl<T> Vec<T> {
     ///
     /// Entry at `index` must be initialized.
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
-        let location = Location::of(index);
-
         // Safety: Caller guarantees the entry is initialized.
         unsafe {
+            let location = Location::of_unchecked(index);
+
             let entry = self
                 .buckets
                 .get_unchecked(location.bucket)
@@ -139,7 +130,7 @@ impl<T> Vec<T> {
             return None;
         }
 
-        // Safety: `location.entry` is always in bounds for it's bucket.
+        // Safety: `location.entry` is always in bounds for its bucket.
         let entry = unsafe { &mut *entries.add(location.entry) };
 
         if *entry.active.get_mut() {
@@ -157,10 +148,10 @@ impl<T> Vec<T> {
     ///
     /// Entry at `index` must be initialized.
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
-        let location = Location::of(index);
-
-        // Safety: caller guarantees the entry is initialized.
+        // Safety: Caller guarantees the entry is initialized.
         unsafe {
+            let location = Location::of_unchecked(index);
+
             let entry = self
                 .buckets
                 .get_unchecked_mut(location.bucket)
@@ -177,7 +168,11 @@ impl<T> Vec<T> {
         let index = self.inflight.fetch_add(1, Ordering::Relaxed);
 
         // The inflight counter is a `u64` to catch overflows of the vector's capacity.
-        index.try_into().expect("overflowed maximum capacity")
+        if index > (MAX_ENTRY as u64) {
+            panic!("capacity overflow");
+        }
+
+        index as usize
     }
 
     /// Appends an element returned from the closure to the back of the vector
@@ -191,17 +186,25 @@ impl<T> Vec<T> {
     {
         let index = self.next_index();
         let value = f(index);
-        self.write(index, value)
+
+        // Safety: `next_index` is always in-bounds.
+        unsafe { self.write(index, value) }
     }
 
     /// Appends an element to the back of the vector.
     pub fn push(&self, value: T) -> usize {
-        self.write(self.next_index(), value)
+        // Safety: `next_index` is always in-bounds.
+        unsafe { self.write(self.next_index(), value) }
     }
 
     /// Write an element at the given index.
-    fn write(&self, index: usize, value: T) -> usize {
-        let location = Location::of(index);
+    ///
+    /// # Safety
+    ///
+    /// The index must be in-bounds.
+    unsafe fn write(&self, index: usize, value: T) -> usize {
+        // Safety: Caller guarantees the entry is initialized.
+        let location = unsafe { Location::of_unchecked(index) };
 
         // Eagerly allocate the next bucket if we are close to the end of this one.
         if index == (location.bucket_len - (location.bucket_len >> 3)) {
@@ -220,7 +223,7 @@ impl<T> Vec<T> {
         }
 
         unsafe {
-            // Safety: `location.entry` is always in bounds for it's bucket.
+            // Safety: `location.entry` is always in bounds for its bucket.
             let entry = &*entries.add(location.entry);
 
             // Safety: We have unique access to this entry.
@@ -241,7 +244,7 @@ impl<T> Vec<T> {
         index
     }
 
-    // Race to intialize a bucket.
+    // Race to initialize a bucket.
     //
     // Note that we avoid contention on bucket allocation by having a specified
     // writer eagerly allocate the next bucket.
@@ -266,7 +269,7 @@ impl<T> Vec<T> {
     // the vector. The collection may reserve more space to avoid frequent reallocations.
     pub fn reserve(&self, additional: usize) {
         let len = self.count.load(Ordering::Acquire);
-        let mut location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRIES));
+        let mut location = Location::of(len.checked_add(additional).unwrap_or(MAX_ENTRY));
 
         // Allocate buckets starting from the bucket at `len + additional` and
         // working our way backwards.
@@ -274,7 +277,7 @@ impl<T> Vec<T> {
             // Safety: `location.bucket` is always in bounds.
             let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
 
-            // Reached an initalized bucket, we're done.
+            // Reached an initialized bucket, we're done.
             if !bucket.entries.load(Ordering::Relaxed).is_null() {
                 break;
             }
@@ -303,6 +306,18 @@ impl<T> Vec<T> {
                 bucket_len: Location::bucket_capacity(0),
             },
         }
+    }
+
+    /// Clear every element in the vector.
+    pub fn clear(&mut self) {
+        let mut iter = self.iter();
+
+        // Consume and reset every entry in the vector.
+        while iter.next_owned(self).is_some() {}
+
+        // Reset the count.
+        self.count.store(0, Ordering::Relaxed);
+        self.inflight.store(0, Ordering::Relaxed);
     }
 }
 
@@ -415,11 +430,26 @@ const SKIP_BUCKET: usize = ((usize::BITS - SKIP.leading_zeros()) as usize) - 1;
 impl Location {
     /// Returns the location of a given entry in a vector.
     fn of(index: usize) -> Location {
-        let skipped = index.checked_add(SKIP).expect("exceeded maximum length");
-        let bucket = usize::BITS - skipped.leading_zeros();
+        let skipped = index.checked_add(SKIP).expect("index out of bounds");
+        Location::of_raw(skipped)
+    }
+
+    /// Returns the location of a given entry in a vector, without bounds checks.
+    ///
+    /// # Safety
+    ///
+    /// The index must be in-bounds.
+    unsafe fn of_unchecked(index: usize) -> Location {
+        // Note: This can lead to unsoundness if it wraps.
+        Location::of_raw(index + SKIP)
+    }
+
+    /// Returns the location of a given entry in a vector, without offsetting.
+    fn of_raw(index: usize) -> Location {
+        let bucket = usize::BITS - index.leading_zeros();
         let bucket = (bucket as usize) - (SKIP_BUCKET + 1);
         let bucket_len = Location::bucket_capacity(bucket);
-        let entry = skipped ^ bucket_len;
+        let entry = index ^ bucket_len;
 
         Location {
             bucket,
@@ -519,6 +549,7 @@ impl Iter {
         self.yielded
     }
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -548,8 +579,17 @@ mod tests {
             assert_eq!(loc.bucket, 2);
             assert_eq!(loc.entry, i - 96);
         }
+    }
 
-        let max = Location::of(MAX_ENTRIES);
+    #[test]
+    fn max_entries() {
+        let mut entries = 0;
+        for i in 0..BUCKETS {
+            entries += Location::bucket_capacity(i);
+        }
+        assert_eq!(entries, MAX_ENTRY + 1);
+
+        let max = Location::of(MAX_ENTRY);
         assert_eq!(max.bucket, BUCKETS - 1);
         assert_eq!(max.bucket_len, 1 << 63);
         assert_eq!(max.entry, (1 << 63) - 1);

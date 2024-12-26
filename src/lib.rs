@@ -104,26 +104,6 @@ impl<T> Vec<T> {
         }
     }
 
-    /// Clears the vector, removing all values.
-    ///
-    /// Note that this method has no effect on the allocated capacity
-    /// of the vector.
-    ///
-    /// # Examples
-    /// ```
-    /// let mut vec = boxcar::Vec::new();
-    /// vec.push(1);
-    /// vec.push(2);
-    ///
-    /// vec.clear();
-    /// assert!(vec.is_empty());
-    ///
-    /// vec.push(3); // Will not allocate.
-    /// ```
-    pub fn clear(&mut self) {
-        self.raw.clear();
-    }
-
     /// Reserves capacity for at least `additional` more elements to be inserted
     /// in the given `Vec<T>`. The collection may reserve more space to avoid
     /// frequent reallocations.
@@ -166,6 +146,7 @@ impl<T> Vec<T> {
     /// at the index supplied to the closure.
     ///
     /// Returns the index that the element was inserted into.
+    ///
     /// # Examples
     ///
     /// ```
@@ -312,6 +293,27 @@ impl<T> Vec<T> {
             vec: &self.raw,
             raw: self.raw.iter(),
         }
+    }
+
+    /// Clears the vector, removing all values.
+    ///
+    /// Note that this method has no effect on the allocated capacity
+    /// of the vector.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut vec = boxcar::Vec::new();
+    /// vec.push(1);
+    /// vec.push(2);
+    ///
+    /// vec.clear();
+    /// assert!(vec.is_empty());
+    ///
+    /// vec.push(3); // Will not allocate.
+    /// ```
+    pub fn clear(&mut self) {
+        self.raw.clear();
     }
 }
 

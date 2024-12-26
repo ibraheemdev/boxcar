@@ -6,7 +6,7 @@
 
 A concurrent, append-only vector.
 
-The vector provided by this crate suports concurrent `get` and `push` operations. All operations are lock-free.
+The vector provided by this crate supports concurrent `get` and `push` operations. All operations are lock-free.
 
 ## Examples
 
