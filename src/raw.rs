@@ -46,6 +46,7 @@ impl<T> Vec<T> {
     };
 
     /// Constructs a new, empty `Vec<T>` with the specified capacity.
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Vec<T> {
         let init = match capacity {
             0 => 0,
@@ -68,11 +69,13 @@ impl<T> Vec<T> {
     }
 
     /// Returns the number of elements in the vector.
+    #[inline]
     pub fn count(&self) -> usize {
         self.count.load(Ordering::Acquire)
     }
 
     /// Returns a reference to the element at the given index.
+    #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
         let location = Location::of(index);
 
@@ -108,6 +111,7 @@ impl<T> Vec<T> {
     /// # Safety
     ///
     /// The entry at `index` must be initialized.
+    #[inline]
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         // Safety: Caller guarantees the bucket and entry are initialized.
         unsafe {
@@ -125,6 +129,7 @@ impl<T> Vec<T> {
     }
 
     /// Returns a mutable reference to the element at the given index.
+    #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         let location = Location::of(index);
 
@@ -160,6 +165,7 @@ impl<T> Vec<T> {
     /// # Safety
     ///
     /// The entry at `index` must be initialized.
+    #[inline]
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
         // Safety: Caller guarantees the bucket and entry are initialized.
         unsafe {
@@ -177,6 +183,7 @@ impl<T> Vec<T> {
     }
 
     /// Returns a unique index for insertion.
+    #[inline]
     fn next_index(&self) -> usize {
         #[cfg(target_has_atomic = "64")]
         {
@@ -208,6 +215,7 @@ impl<T> Vec<T> {
     ///
     /// This allows for use of the would-be index to be utilized within the
     /// element.
+    #[inline]
     pub fn push_with<F>(&self, f: F) -> usize
     where
         F: FnOnce(usize) -> T,
@@ -221,6 +229,7 @@ impl<T> Vec<T> {
     }
 
     /// Appends an element to the back of the vector.
+    #[inline]
     pub fn push(&self, value: T) -> usize {
         // Safety: `next_index` is always in-bounds and unique.
         unsafe { self.write(self.next_index(), value) }
@@ -231,6 +240,7 @@ impl<T> Vec<T> {
     /// # Safety
     ///
     /// The index must be unique and in-bounds.
+    #[inline]
     unsafe fn write(&self, index: usize, value: T) -> usize {
         // Safety: Caller guarantees the entry is initialized.
         let location = unsafe { Location::of_unchecked(index) };
@@ -291,6 +301,8 @@ impl<T> Vec<T> {
     ///
     /// Note that we avoid contention on bucket allocation by having a specified
     /// writer eagerly allocate the next bucket.
+    #[cold]
+    #[inline(never)]
     fn get_or_alloc(bucket: &Bucket<T>, len: usize) -> *mut Entry<T> {
         let entries = Bucket::alloc(len);
 
@@ -350,6 +362,7 @@ impl<T> Vec<T> {
     }
 
     // Returns an iterator over the vector.
+    #[inline]
     pub fn iter(&self) -> Iter {
         Iter {
             index: 0,
@@ -363,6 +376,7 @@ impl<T> Vec<T> {
     }
 
     /// Clear every element in the vector.
+    #[inline]
     pub fn clear(&mut self) {
         let mut iter = self.iter();
 
@@ -378,6 +392,7 @@ impl<T> Vec<T> {
 impl<T> Index<usize> for Vec<T> {
     type Output = T;
 
+    #[inline]
     fn index(&self, index: usize) -> &Self::Output {
         self.get(index)
             .unwrap_or_else(|| panic!("index `{index}` is uninitialized"))
@@ -460,6 +475,7 @@ impl<T> Entry<T> {
     /// # Safety
     ///
     /// The value must be initialized.
+    #[inline]
     unsafe fn value_unchecked(&self) -> &T {
         // Safety: Guaranteed by caller.
         unsafe { (*self.slot.get()).assume_init_ref() }
@@ -470,6 +486,7 @@ impl<T> Entry<T> {
     // # Safety
     //
     // The value must be initialized.
+    #[inline]
     unsafe fn value_unchecked_mut(&mut self) -> &mut T {
         // Safety: Guaranteed by caller.
         unsafe { self.slot.get_mut().assume_init_mut() }
@@ -523,6 +540,7 @@ impl Location {
     /// Returns the location of a given entry in a vector.
     ///
     /// This function will panic if the entry is greater than `MAX_INDEX`.
+    #[inline]
     fn of(index: usize) -> Location {
         if index > MAX_INDEX {
             panic!("index out of bounds");
@@ -536,12 +554,14 @@ impl Location {
     /// # Safety
     ///
     /// The index must be in-bounds.
+    #[inline]
     unsafe fn of_unchecked(index: usize) -> Location {
         // Note: This can lead to unsoundness if it wraps.
         Location::of_raw(index + ZERO_ENTRY)
     }
 
     /// Returns the location of the entry at index `index - ZERO_INDEX` in a vector.
+    #[inline]
     fn of_raw(index: usize) -> Location {
         // Calculate the bucket index based on ⌊log2(index)⌋.
         let bucket = BUCKETS - ((index + 1).leading_zeros() as usize) - 1;
@@ -558,6 +578,7 @@ impl Location {
     }
 
     /// Returns the capacity of the bucket at the given index.
+    #[inline]
     fn bucket_capacity(bucket: usize) -> usize {
         1 << (bucket + ZERO_BUCKET)
     }
@@ -575,6 +596,7 @@ impl Iter {
     /// Returns a pointer to the next entry in the iterator.
     ///
     /// Any returned entries are guaranteed to be initialized.
+    #[inline]
     fn next<T>(&mut self, vec: &Vec<T>) -> Option<(usize, *mut Entry<T>)> {
         // We returned every entry in the vector, we're done.
         if self.yielded == vec.count() {
@@ -630,6 +652,7 @@ impl Iter {
     }
 
     /// Returns a shared reference to the next entry in the iterator.
+    #[inline]
     pub fn next_shared<'v, T>(&mut self, vec: &'v Vec<T>) -> Option<(usize, &'v T)> {
         self.next(vec)
             // Safety: `Iter::next` guarantees that the entry is initialized.
@@ -638,6 +661,7 @@ impl Iter {
 
     /// Returns an owned reference to the next entry in the iterator, resetting the entry in
     /// the vector.
+    #[inline]
     pub fn next_owned<T>(&mut self, vec: &mut Vec<T>) -> Option<T> {
         self.next(vec).map(|(_, entry)| {
             // Safety: `Iter::next` guarantees that the entry is initialized, and we have `&mut Vec<T>`.
@@ -652,6 +676,7 @@ impl Iter {
     }
 
     /// Returns the number of elements that have been yielded by this iterator.
+    #[inline]
     pub fn yielded(&self) -> usize {
         self.yielded
     }
