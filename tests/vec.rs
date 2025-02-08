@@ -4,6 +4,10 @@ use std::{sync::Barrier, thread};
 #[test]
 fn simple() {
     let vec = boxcar::vec![0, 1, 2];
+    assert_eq!(vec[0], 0);
+    assert_eq!(vec[1], 1);
+    assert_eq!(vec[2], 2);
+
     for x in 3..1000 {
         let i = vec.push(x);
         assert_eq!(vec[i], x);
