@@ -54,9 +54,9 @@ macro_rules! vec {
 ///
 /// # Notes
 ///
-/// The bucket array is stored inline, meaning that the
-/// `Vec<T>` is quite large. It is expected that you
-/// store it behind an [`Arc`](std::sync::Arc) or similar.
+/// The bucket array is stored inline, meaning that the `Vec<T>` type
+/// is quite large on the stack. It is expected that you store it behind
+/// an [`Arc`](std::sync::Arc) or similar.
 pub struct Vec<T> {
     raw: raw::Vec<T>,
 }
@@ -101,11 +101,11 @@ impl<T> Vec<T> {
     /// let vec = boxcar::Vec::with_capacity(10);
     ///
     /// for i in 0..10 {
-    ///     // will not allocate
+    ///     // Will not allocate.
     ///     vec.push(i);
     /// }
     ///
-    /// // may allocate
+    /// // May allocate.
     /// vec.push(11);
     /// ```
     #[inline]
@@ -128,11 +128,11 @@ impl<T> Vec<T> {
     /// vec.reserve(10);
     ///
     /// for i in 0..10 {
-    ///     // will not allocate
+    ///     // Will not allocate.
     ///     vec.push(i);
     /// }
     ///
-    /// // may allocate
+    /// // May allocate.
     /// vec.push(11);
     /// ```
     pub fn reserve(&self, additional: usize) {

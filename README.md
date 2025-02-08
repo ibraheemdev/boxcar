@@ -7,6 +7,8 @@
 A concurrent, append-only vector.
 
 The vector provided by this crate supports lock-free `get` and `push` operations.
+The vector grows internally but never reallocates, so element addresses are stable
+for the lifetime of the vector. Additionally, both `get` and `push` run in constant-time.
 
 ## Examples
 
@@ -14,62 +16,45 @@ Appending an element to a vector and retrieving it:
 
 ```rust
 let vec = boxcar::Vec::new();
-vec.push(42);
-assert_eq!(vec[0], 42);
+let i = vec.push(42);
+assert_eq!(vec[i], 42);
 ```
 
-The vector can be shared across threads with an `Arc`:
+The vector can be modified by multiple threads concurrently:
 
 ```rust
-use std::sync::Arc;
+let vec = boxcar::Vec::new();
 
-fn main() {
-    let vec = Arc::new(boxcar::Vec::new());
+// Spawn a few threads that append to the vector.
+std::thread::scope(|s| for i in 0..6 {
+    let vec = &vec;
 
-    // spawn 6 threads that append to the vec
-    let threads = (0..6)
-        .map(|i| {
-            let vec = vec.clone();
+    s.spawn(move || {
+        // Push through the shared reference.
+        vec.push(i);
+    });
+});
 
-            std::thread::spawn(move || {
-                vec.push(i); // push through `&Vec`
-            })
-        })
-        .collect::<Vec<_>>();
-
-    // wait for the threads to finish
-    for thread in threads {
-        thread.join().unwrap();
-    }
-
-    for i in 0..6 {
-        assert!(vec.iter().any(|(_, &x)| x == i));
-    }
+for i in 0..6 {
+    assert!(vec.iter().any(|(_, &x)| x == i));
 }
 ```
 
 Elements can be mutated through fine-grained locking:
 
 ```rust
-use std::sync::{Mutex, Arc};
+let vec = boxcar::Vec::new();
 
-fn main() {
-    let vec = Arc::new(boxcar::Vec::new());
+std::thread::scope(|s| {
+    // Insert an element.
+    vec.push(std::sync::Mutex::new(0));
 
-    // insert an element
-    vec.push(Mutex::new(1));
-
-    let thread = std::thread::spawn({
-        let vec = vec.clone();
-        move || {
-            // mutate through the mutex
-            *vec[0].lock().unwrap() += 1;
-        }
+    s.spawn(|| {
+        // Mutate through the lock.
+        *vec[0].lock().unwrap() += 1;
     });
+});
 
-    thread.join().unwrap();
-
-    let x = vec[0].lock().unwrap();
-    assert_eq!(*x, 2);
-}
+let x = vec[0].lock().unwrap();
+assert_eq!(*x, 1);
 ```
