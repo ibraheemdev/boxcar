@@ -74,6 +74,7 @@ impl<T> Vec<T> {
     /// ```
     /// let vec: boxcar::Vec<i32> = boxcar::Vec::new();
     /// ```
+    #[inline]
     pub const fn new() -> Vec<T> {
         Vec {
             raw: raw::Vec::EMPTY,
@@ -98,6 +99,7 @@ impl<T> Vec<T> {
     /// // may allocate
     /// vec.push(11);
     /// ```
+    #[inline]
     pub fn with_capacity(capacity: usize) -> Vec<T> {
         Vec {
             raw: raw::Vec::with_capacity(capacity),
@@ -138,6 +140,7 @@ impl<T> Vec<T> {
     /// assert_eq!(vec.push(3), 2);
     /// assert_eq!(vec, [1, 2, 3]);
     /// ```
+    #[inline]
     pub fn push(&self, value: T) -> usize {
         self.raw.push(value)
     }
@@ -154,6 +157,7 @@ impl<T> Vec<T> {
     /// vec.push_with(|index| index);
     /// assert_eq!(vec, [0, 1, 2]);
     /// ```
+    #[inline]
     pub fn push_with<F>(&self, f: F) -> usize
     where
         F: Fn(usize) -> T,
@@ -205,6 +209,7 @@ impl<T> Vec<T> {
     /// assert_eq!(Some(&40), vec.get(1));
     /// assert_eq!(None, vec.get(3));
     /// ```
+    #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
         self.raw.get(index)
     }
@@ -218,6 +223,7 @@ impl<T> Vec<T> {
     /// assert_eq!(Some(&mut 40), vec.get_mut(1));
     /// assert_eq!(None, vec.get_mut(3));
     /// ```
+    #[inline]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
         self.raw.get_mut(index)
     }
@@ -242,6 +248,7 @@ impl<T> Vec<T> {
     ///     assert_eq!(vec.get_unchecked(1), &2);
     /// }
     /// ```
+    #[inline]
     pub unsafe fn get_unchecked(&self, index: usize) -> &T {
         // Safety: Guaranteed by caller.
         unsafe { self.raw.get_unchecked(index) }
@@ -266,6 +273,7 @@ impl<T> Vec<T> {
     ///     assert_eq!(vec.get_unchecked_mut(1), &mut 2);
     /// }
     /// ```
+    #[inline]
     pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
         // Safety: Guaranteed by caller.
         unsafe { self.raw.get_unchecked_mut(index) }
@@ -288,6 +296,7 @@ impl<T> Vec<T> {
     /// assert_eq!(iterator.next(), Some((2, &4)));
     /// assert_eq!(iterator.next(), None);
     /// ```
+    #[inline]
     pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             vec: &self.raw,
@@ -312,6 +321,7 @@ impl<T> Vec<T> {
     ///
     /// vec.push(3); // Will not allocate.
     /// ```
+    #[inline]
     pub fn clear(&mut self) {
         self.raw.clear();
     }
@@ -320,6 +330,7 @@ impl<T> Vec<T> {
 impl<T> Index<usize> for Vec<T> {
     type Output = T;
 
+    #[inline]
     fn index(&self, index: usize) -> &Self::Output {
         &self.raw[index]
     }
@@ -358,10 +369,12 @@ pub struct IntoIter<T> {
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.raw.next_owned(&mut self.vec)
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let remaining = self.vec.count() - self.raw.yielded();
         (remaining, Some(remaining))
@@ -388,10 +401,12 @@ impl<'a, T> Clone for Iter<'a, T> {
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = (usize, &'a T);
 
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         self.raw.next_shared(self.vec)
     }
 
+    #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.vec.count() - self.raw.yielded(), None)
     }
@@ -431,6 +446,7 @@ impl<T> FromIterator<T> for Vec<T> {
 }
 
 impl<T> Extend<T> for Vec<T> {
+    #[inline]
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let iter = iter.into_iter();
 
