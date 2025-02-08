@@ -30,4 +30,4 @@ loom = { version = "0.7" }
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [dev-dependencies]
-criterion = "0.3.5"
+criterion = "0.5"
