@@ -5,6 +5,7 @@
 
 extern crate alloc;
 
+mod loom;
 mod raw;
 
 use core::fmt;
@@ -75,9 +76,17 @@ impl<T> Vec<T> {
     /// let vec: boxcar::Vec<i32> = boxcar::Vec::new();
     /// ```
     #[inline]
+    #[cfg(not(loom))]
     pub const fn new() -> Vec<T> {
         Vec {
-            raw: raw::Vec::EMPTY,
+            raw: raw::Vec::new(),
+        }
+    }
+
+    #[cfg(loom)]
+    pub fn new() -> Vec<T> {
+        Vec {
+            raw: raw::Vec::new(),
         }
     }
 
