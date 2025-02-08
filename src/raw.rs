@@ -14,27 +14,27 @@ type Inflight = core::sync::atomic::AtomicU64;
 #[cfg(not(target_has_atomic = "64"))]
 type Inflight = core::sync::atomic::AtomicUsize;
 
-// A lock-free, append-only vector.
+/// A lock-free, append-only vector.
 pub struct Vec<T> {
-    // A counter used to retrieve a unique index to push to.
-    //
-    // This value may be more than the true length as it will
-    // be incremented before values are actually stored.
+    /// A counter used to retrieve a unique index to push to.
+    ///
+    /// This value may be more than the true length as it will
+    /// be incremented before values are actually stored.
     inflight: Inflight,
 
-    // Buckets of length 32, 64 .. 2^63.
+    /// Buckets of length 32, 64 .. 2^63.
     buckets: [Bucket<T>; BUCKETS],
 
-    // The number of initialized elements in this vector.
+    /// The number of initialized elements in this vector.
     count: AtomicUsize,
 }
 
-// Safety: A `Vec` owns its elements, so sending a
-// vector also sends its elements, hence `T: Send`.
+/// Safety: A `Vec` owns its elements, so sending a
+/// vector also sends its elements, hence `T: Send`.
 unsafe impl<T: Send> Send for Vec<T> {}
 
-// Safety: Sharing a `Vec` only exposes shared access
-// to the elements inside, so we only require `T: Sync`.
+/// Safety: Sharing a `Vec` only exposes shared access
+/// to the elements inside, so we only require `T: Sync`.
 unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
@@ -279,8 +279,9 @@ impl<T> Vec<T> {
 
             // Let other threads know that this entry is active.
             //
-            // Note that the `Release` ordering enables a happens-before
-            // relationship with the write above for readers.
+            // Note that this `Release` write synchronizes with the `Acquire`
+            // load in `Vec::get`, establishing a happens-before relationship
+            // with the write of the value above.
             entry.active.store(true, Ordering::Release);
         }
 
