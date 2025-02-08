@@ -1,18 +1,20 @@
 #![allow(clippy::declare_interior_mutable_const)]
 
-use core::cell::UnsafeCell;
 use core::mem::{self, MaybeUninit};
 use core::ops::Index;
-use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 use core::{ptr, slice};
+
+use crate::loom::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use crate::loom::cell::UnsafeCell;
+use crate::loom::AtomicMut;
 
 use alloc::boxed::Box;
 
 #[cfg(target_has_atomic = "64")]
-type Inflight = core::sync::atomic::AtomicU64;
+type Inflight = crate::loom::atomic::AtomicU64;
 
 #[cfg(not(target_has_atomic = "64"))]
-type Inflight = core::sync::atomic::AtomicUsize;
+type Inflight = crate::loom::atomic::AtomicUsize;
 
 /// A lock-free, append-only vector.
 pub struct Vec<T> {
@@ -39,11 +41,30 @@ unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
     /// An empty vector.
-    pub const EMPTY: Vec<T> = Vec {
+    #[cfg(not(loom))]
+    const EMPTY: Vec<T> = Vec {
         inflight: Inflight::new(0),
         buckets: [Bucket::EMPTY; BUCKETS],
         count: AtomicUsize::new(0),
     };
+
+    /// Create an empty vector.
+    #[cfg(not(loom))]
+    pub const fn new() -> Vec<T> {
+        Vec::EMPTY
+    }
+
+    /// Create an empty vector.
+    #[cfg(loom)]
+    pub fn new() -> Vec<T> {
+        Vec {
+            inflight: Inflight::new(0),
+            buckets: [0; BUCKETS].map(|_| Bucket {
+                entries: AtomicPtr::new(ptr::null_mut()),
+            }),
+            count: AtomicUsize::new(0),
+        }
+    }
 
     /// Constructs a new, empty `Vec<T>` with the specified capacity.
     #[inline]
@@ -54,23 +75,21 @@ impl<T> Vec<T> {
             n => Location::of(n - 1).bucket,
         };
 
-        let mut buckets = [Bucket::EMPTY; BUCKETS];
-        for (i, bucket) in buckets[..=init].iter_mut().enumerate() {
+        let mut vec = Vec::new();
+        for (i, bucket) in vec.buckets[..=init].iter_mut().enumerate() {
             // Initialize each bucket.
             let len = Location::bucket_capacity(i);
             *bucket = Bucket::from_ptr(Bucket::alloc(len));
         }
 
-        Vec {
-            buckets,
-            inflight: Inflight::new(0),
-            count: AtomicUsize::new(0),
-        }
+        vec
     }
 
     /// Returns the number of elements in the vector.
     #[inline]
     pub fn count(&self) -> usize {
+        // The `Acquire` here synchronizes with the `Release` increment
+        // when an entry is added to the vector.
         self.count.load(Ordering::Acquire)
     }
 
@@ -80,6 +99,9 @@ impl<T> Vec<T> {
         let location = Location::of(index);
 
         // Safety: `location.bucket` is always in bounds.
+        //
+        // The `Acquire` load here synchronizes with the `Release`
+        // store in `Vec::get_or_alloc`.
         let entries = unsafe {
             self.buckets
                 .get_unchecked(location.bucket)
@@ -97,8 +119,8 @@ impl<T> Vec<T> {
 
         if entry.active.load(Ordering::Acquire) {
             // Safety: The entry is active. Additionally, the `Acquire`
-            // ordering ensures that the initialization happens-before
-            // this read.
+            // load synchronizes with the `Release` store in `Vec::write`,
+            // ensuring the initialization happens-before this read.
             unsafe { return Some(entry.value_unchecked()) }
         }
 
@@ -117,6 +139,8 @@ impl<T> Vec<T> {
         unsafe {
             let location = Location::of_unchecked(index);
 
+            // The `Acquire` load here synchronizes with the `Release`
+            // store in `Vec::get_or_alloc`.
             let entry = self
                 .buckets
                 .get_unchecked(location.bucket)
@@ -138,7 +162,7 @@ impl<T> Vec<T> {
             self.buckets
                 .get_unchecked_mut(location.bucket)
                 .entries
-                .get_mut()
+                .read_mut()
         };
 
         // The bucket is uninitialized.
@@ -149,10 +173,8 @@ impl<T> Vec<T> {
         // Safety: `location.entry` is always in bounds for its bucket.
         let entry = unsafe { &mut *entries.add(location.entry) };
 
-        if *entry.active.get_mut() {
-            // Safety: The entry is active. Additionally, the `Acquire`
-            // ordering ensures that the initialization happens-before
-            // this read.
+        if entry.active.read_mut() {
+            // Safety: The entry is active.
             unsafe { return Some(entry.value_unchecked_mut()) }
         }
 
@@ -175,7 +197,7 @@ impl<T> Vec<T> {
                 .buckets
                 .get_unchecked_mut(location.bucket)
                 .entries
-                .get_mut()
+                .read_mut()
                 .add(location.entry);
 
             (*entry).value_unchecked_mut()
@@ -254,6 +276,9 @@ impl<T> Vec<T> {
 
         // Safety: `location.bucket` is always in bounds.
         let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
+
+        // The `Acquire` load here synchronizes with the `Release`
+        // store in `Vec::get_or_alloc`.
         let mut entries = bucket.entries.load(Ordering::Acquire);
 
         // The bucket has not been allocated yet.
@@ -275,13 +300,14 @@ impl<T> Vec<T> {
             //
             // 2. Any thread trying to `get` this entry will see `!active`
             // and will not try to access it.
-            entry.slot.get().write(MaybeUninit::new(value));
+            entry
+                .slot
+                .with_mut(|slot| slot.write(MaybeUninit::new(value)));
 
             // Let other threads know that this entry is active.
             //
             // Note that this `Release` write synchronizes with the `Acquire`
-            // load in `Vec::get`, establishing a happens-before relationship
-            // with the write of the value above.
+            // load in `Vec::get`.
             entry.active.store(true, Ordering::Release);
         }
 
@@ -403,7 +429,7 @@ impl<T> Index<usize> for Vec<T> {
 impl<T> Drop for Vec<T> {
     fn drop(&mut self) {
         for (i, bucket) in self.buckets.iter_mut().enumerate() {
-            let entries = *bucket.entries.get_mut();
+            let entries = bucket.entries.read_mut();
 
             if entries.is_null() {
                 break;
@@ -425,7 +451,10 @@ struct Bucket<T> {
 
 impl<T> Bucket<T> {
     /// An empty bucket.
-    const EMPTY: Bucket<T> = Bucket::from_ptr(ptr::null_mut());
+    #[cfg(not(loom))]
+    const EMPTY: Bucket<T> = Bucket {
+        entries: AtomicPtr::new(ptr::null_mut()),
+    };
 }
 
 /// A possibly uninitialized entry in the vector.
@@ -439,7 +468,7 @@ struct Entry<T> {
 
 impl<T> Bucket<T> {
     /// Create a `Bucket` from the given `Entry` pointer.
-    const fn from_ptr(entries: *mut Entry<T>) -> Bucket<T> {
+    fn from_ptr(entries: *mut Entry<T>) -> Bucket<T> {
         Bucket {
             entries: AtomicPtr::new(entries),
         }
@@ -479,7 +508,7 @@ impl<T> Entry<T> {
     #[inline]
     unsafe fn value_unchecked(&self) -> &T {
         // Safety: Guaranteed by caller.
-        unsafe { (*self.slot.get()).assume_init_ref() }
+        self.slot.with(|slot| unsafe { (*slot).assume_init_ref() })
     }
 
     /// Returns a mutable reference to the value in this entry.
@@ -490,15 +519,16 @@ impl<T> Entry<T> {
     #[inline]
     unsafe fn value_unchecked_mut(&mut self) -> &mut T {
         // Safety: Guaranteed by caller.
-        unsafe { self.slot.get_mut().assume_init_mut() }
+        self.slot
+            .with_mut(|slot| unsafe { (*slot).assume_init_mut() })
     }
 }
 
 impl<T> Drop for Entry<T> {
     fn drop(&mut self) {
-        if *self.active.get_mut() {
+        if self.active.read_mut() {
             // Safety: We have `&mut self` and verifid that the value is initialized.
-            unsafe { ptr::drop_in_place((*self.slot.get()).as_mut_ptr()) }
+            unsafe { ptr::drop_in_place(self.slot.with_mut(|slot| (*slot).as_mut_ptr())) }
         }
     }
 }
@@ -669,10 +699,13 @@ impl Iter {
             let entry = unsafe { &mut *entry };
 
             // Mark the entry as uninitialized so it is not accessed after this.
-            *entry.active.get_mut() = false;
+            entry.active.write_mut(false);
 
             // Safety: `Iter::next` only yields initialized entries.
-            unsafe { mem::replace(&mut *entry.slot.get(), MaybeUninit::uninit()).assume_init() }
+            unsafe {
+                let slot = entry.slot.with_mut(|slot| &mut *slot);
+                mem::replace(slot, MaybeUninit::uninit()).assume_init()
+            }
         })
     }
 
