@@ -27,6 +27,31 @@ fn simple() {
 }
 
 #[test]
+fn simple_boxed() {
+    let vec = boxcar::vec![Box::new(0), Box::new(1), Box::new(2)];
+    assert_eq!(vec[0], Box::new(0));
+    assert_eq!(vec[1], Box::new(1));
+    assert_eq!(vec[2], Box::new(2));
+
+    for x in 3..1000 {
+        let i = vec.push(Box::new(x));
+        assert_eq!(*vec[i], x);
+    }
+
+    for i in 0..1000 {
+        assert_eq!(*vec[i], i);
+    }
+
+    for (i, x) in vec.iter() {
+        assert_eq!(i, **x);
+    }
+
+    for (i, x) in vec.into_iter().enumerate() {
+        assert_eq!(i, *x);
+    }
+}
+
+#[test]
 fn clear() {
     struct T<'a>(&'a AtomicUsize);
     impl Drop for T<'_> {
