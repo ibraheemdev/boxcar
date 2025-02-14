@@ -247,14 +247,60 @@ impl<T> Vec<T> {
         let value = f(index);
 
         // Safety: `next_index` is always in-bounds and unique.
-        unsafe { self.write(index, value) }
+        unsafe { self.write(self.next_index(), value) };
+
+        // Increase the element count.
+        //
+        // The `Release` here is not strictly necessary, but does
+        // allow users to use `count` for some sort of synchronization
+        // in terms of the number of initialized elements.
+        self.count.fetch_add(1, Ordering::Release);
+
+        index
     }
 
     /// Appends an element to the back of the vector.
     #[inline]
     pub fn push(&self, value: T) -> usize {
+        let index = self.next_index();
+
         // Safety: `next_index` is always in-bounds and unique.
-        unsafe { self.write(self.next_index(), value) }
+        unsafe { self.write(index, value) };
+
+        // Increase the element count.
+        //
+        // The `Release` here is not strictly necessary, but does
+        // allow users to use `count` for some sort of synchronization
+        // in terms of the number of initialized elements.
+        self.count.fetch_add(1, Ordering::Release);
+
+        index
+    }
+
+    /// Appends an element to the back of the vector.
+    ///
+    /// # Safety
+    ///
+    /// This method cannot be called concurrently with itself or `Vec::push`
+    /// from multiple threads.
+    #[inline]
+    pub unsafe fn push_single_writer(&self, value: T) -> usize {
+        let index = self.inflight.load(Ordering::Relaxed);
+        assert_ne!(index, MAX_INDEX as u64, "capacity overflow");
+        self.inflight.store(index + 1, Ordering::Relaxed);
+        let index = index as usize;
+
+        // Safety: `next_index` is always in-bounds and unique.
+        unsafe { self.write(index, value) };
+
+        // Increase the element count.
+        //
+        // The `Release` here is not strictly necessary, but does
+        // allow users to use `count` for some sort of synchronization
+        // in terms of the number of initialized elements.
+        self.count.store(index + 1, Ordering::Release);
+
+        index as usize
     }
 
     /// Write an element at the given index.
@@ -263,7 +309,7 @@ impl<T> Vec<T> {
     ///
     /// The index must be unique and in-bounds.
     #[inline]
-    unsafe fn write(&self, index: usize, value: T) -> usize {
+    unsafe fn write(&self, index: usize, value: T) {
         // Safety: Caller guarantees the entry is initialized.
         let location = unsafe { Location::of_unchecked(index) };
 
@@ -310,16 +356,6 @@ impl<T> Vec<T> {
             // load in `Vec::get`.
             entry.active.store(true, Ordering::Release);
         }
-
-        // Increase the element count.
-        //
-        // The `Release` here is not strictly necessary, but does
-        // allow users to use `count` for some sort of synchronization
-        // in terms of the number of initialized elements.
-        self.count.fetch_add(1, Ordering::Release);
-
-        // Return the index of the entry that we initialized.
-        index
     }
 
     /// Race to initialize a bucket.

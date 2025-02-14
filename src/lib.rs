@@ -139,6 +139,18 @@ impl<T> Vec<T> {
         self.raw.reserve(additional)
     }
 
+    /// Appends an element to the back of the vector.
+    ///
+    /// # Safety
+    ///
+    /// This method cannot be called concurrently with itself or `Vec::push`
+    /// from multiple threads.
+    #[inline]
+    pub unsafe fn push_single_writer(&self, value: T) -> usize {
+        // Safety: Guaranteed by caller.
+        unsafe { self.raw.push_single_writer(value) }
+    }
+
     /// Appends an element to the back of the vector,
     /// returning the index it was inserted into.
     ///
