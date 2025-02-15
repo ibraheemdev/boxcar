@@ -174,6 +174,27 @@ impl<T> Vec<T> {
         self.raw.push_with(f)
     }
 
+    /// Write an element at the given index.
+    ///
+    /// This is useful if entry indices are coordinated of pre-determined
+    /// outside of the vector itself.
+    ///
+    /// # Safety
+    ///
+    /// The entry at `index` must be in-bounds and uninitialized.
+    ///
+    /// Additionally, the writer must have unique access to the entry at `index`.
+    ///
+    /// Note that using `Vec::push` or `Vec::push_with` may lead to **undefined behavior**,
+    /// as those methods may attempt to overwrite entries that were initialized manually.
+    /// Generally, when initializing entries manually, `Vec::write` should be the only method
+    /// used to write to the vector.
+    #[inline]
+    pub unsafe fn write(&self, index: usize, value: T) -> &T {
+        // Safety: Guaranteed by caller.
+        unsafe { self.raw.write(index, value) }
+    }
+
     /// Returns the number of elements in the vector.
     ///
     /// Note that due to concurrent writes, it is not guaranteed

@@ -247,23 +247,28 @@ impl<T> Vec<T> {
         let value = f(index);
 
         // Safety: `next_index` is always in-bounds and unique.
-        unsafe { self.write(index, value) }
+        unsafe { self.write(index, value) };
+
+        index
     }
 
     /// Appends an element to the back of the vector.
     #[inline]
     pub fn push(&self, value: T) -> usize {
+        let index = self.next_index();
         // Safety: `next_index` is always in-bounds and unique.
-        unsafe { self.write(self.next_index(), value) }
+        unsafe { self.write(index, value) };
+        index
     }
 
     /// Write an element at the given index.
     ///
     /// # Safety
     ///
-    /// The index must be unique and in-bounds.
+    /// The entry at `index` must be in-bounds and uninitialized.
+    /// Additionally, the writer must have unique access to the entry at `index`.
     #[inline]
-    unsafe fn write(&self, index: usize, value: T) -> usize {
+    pub unsafe fn write(&self, index: usize, value: T) -> &T {
         // Safety: Caller guarantees the entry is initialized.
         let location = unsafe { Location::of_unchecked(index) };
 
@@ -286,7 +291,7 @@ impl<T> Vec<T> {
             entries = Vec::get_or_alloc(bucket, location.bucket_len);
         }
 
-        unsafe {
+        let entry = unsafe {
             // Safety: We loaded the entries pointer with `Acquire` ordering,
             // ensuring that it's initialization happens-before our access.
             //
@@ -309,7 +314,9 @@ impl<T> Vec<T> {
             // Note that this `Release` write synchronizes with the `Acquire`
             // load in `Vec::get`.
             entry.active.store(true, Ordering::Release);
-        }
+
+            entry.slot.with(|slot| (*slot).assume_init_ref())
+        };
 
         // Increase the element count.
         //
@@ -318,8 +325,7 @@ impl<T> Vec<T> {
         // in terms of the number of initialized elements.
         self.count.fetch_add(1, Ordering::Release);
 
-        // Return the index of the entry that we initialized.
-        index
+        entry
     }
 
     /// Race to initialize a bucket.
