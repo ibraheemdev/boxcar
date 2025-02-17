@@ -169,7 +169,7 @@ impl<T> Vec<T> {
     #[inline]
     pub fn push_with<F>(&self, f: F) -> usize
     where
-        F: Fn(usize) -> T,
+        F: FnOnce(usize) -> T,
     {
         self.raw.push_with(f)
     }
