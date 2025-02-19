@@ -1,5 +1,6 @@
 #![allow(clippy::declare_interior_mutable_const)]
 
+use core::alloc::Layout;
 use core::mem::{self, MaybeUninit};
 use core::ops::Index;
 use core::{ptr, slice};
@@ -79,7 +80,8 @@ impl<T> Vec<T> {
         for (i, bucket) in vec.buckets[..=init].iter_mut().enumerate() {
             // Initialize each bucket.
             let len = Location::bucket_capacity(i);
-            *bucket = Bucket::from_ptr(Bucket::alloc(len));
+            // Safety: `Location::bucket_capacity` is non-zero.
+            *bucket = Bucket::from_ptr(unsafe { Bucket::alloc(len) });
         }
 
         vec
@@ -270,7 +272,8 @@ impl<T> Vec<T> {
         // Eagerly allocate the next bucket if we are close to the end of this one.
         if index == (location.bucket_len - (location.bucket_len >> 3)) {
             if let Some(next_bucket) = self.buckets.get(location.bucket + 1) {
-                Vec::get_or_alloc(next_bucket, location.bucket_len << 1);
+                // Safety: Bucket lengths are non-zero.
+                unsafe { Vec::get_or_alloc(next_bucket, location.bucket_len << 1) };
             }
         }
 
@@ -283,7 +286,8 @@ impl<T> Vec<T> {
 
         // The bucket has not been allocated yet.
         if entries.is_null() {
-            entries = Vec::get_or_alloc(bucket, location.bucket_len);
+            // Safety: Bucket lengths are non-zero.
+            entries = unsafe { Vec::get_or_alloc(bucket, location.bucket_len) };
         }
 
         unsafe {
@@ -328,10 +332,15 @@ impl<T> Vec<T> {
     ///
     /// Note that we avoid contention on bucket allocation by having a specified
     /// writer eagerly allocate the next bucket.
+    ///
+    /// # Safety
+    ///
+    /// The provided length must be non-zero.
     #[cold]
     #[inline(never)]
-    fn get_or_alloc(bucket: &Bucket<T>, len: usize) -> *mut Entry<T> {
-        let entries = Bucket::alloc(len);
+    unsafe fn get_or_alloc(bucket: &Bucket<T>, len: usize) -> *mut Entry<T> {
+        // Safety: Guaranteed by caller.
+        let entries = unsafe { Bucket::alloc(len) };
 
         match bucket.entries.compare_exchange(
             ptr::null_mut(),
@@ -376,7 +385,9 @@ impl<T> Vec<T> {
             }
 
             // Allocate the bucket.
-            Vec::get_or_alloc(bucket, location.bucket_len);
+            //
+            // Safety: Bucket lengths are non-zero.
+            unsafe { Vec::get_or_alloc(bucket, location.bucket_len) };
 
             // Reached the first bucket, we're done.
             if location.bucket == 0 {
@@ -474,8 +485,33 @@ impl<T> Bucket<T> {
         }
     }
 
-    /// Allocate a bucket of the specified capacity.
-    fn alloc(len: usize) -> *mut Entry<T> {
+    /// Allocate an array of entries of the specified length.
+    ///
+    /// # Safety
+    ///
+    /// The provided length must be non-zero.
+    #[cfg(not(loom))]
+    unsafe fn alloc(len: usize) -> *mut Entry<T> {
+        let layout = Layout::array::<Entry<T>>(len).unwrap();
+
+        // Note that this sets the `active` flag to `false`.
+        //
+        // Safety: Caller guarantees that `layout` has a non-zero size, and
+        // `AtomicBool`, `UnsafeCell`, and `MaybeUninit` are zeroable types.
+        let ptr = unsafe { alloc::alloc::alloc_zeroed(layout) };
+
+        // Handle allocation errors.
+        if ptr.is_null() {
+            alloc::alloc::handle_alloc_error(layout);
+        }
+
+        ptr.cast::<Entry<T>>()
+    }
+
+    /// Allocate an array of entries of the specified length.
+    #[cfg(loom)]
+    unsafe fn alloc(len: usize) -> *mut Entry<T> {
+        // Note we cannot use `alloc_zeroed` for Loom types.
         let entries = (0..len)
             .map(|_| Entry::<T> {
                 slot: UnsafeCell::new(MaybeUninit::uninit()),
@@ -483,7 +519,7 @@ impl<T> Bucket<T> {
             })
             .collect::<Box<[Entry<_>]>>();
 
-        Box::into_raw(entries) as _
+        Box::into_raw(entries) as *mut Entry<T>
     }
 
     /// Deallocate a bucket of the specified capacity.
