@@ -48,6 +48,57 @@ macro_rules! vec {
     );
 }
 
+pub struct DefaultVec<T> {
+    raw: raw::Vec<T>,
+}
+
+impl<T> Default for DefaultVec<T> {
+    fn default() -> DefaultVec<T> {
+        DefaultVec::new()
+    }
+}
+
+impl<T> DefaultVec<T> {
+    #[inline]
+    pub const fn new() -> DefaultVec<T> {
+        DefaultVec {
+            raw: raw::Vec::new(),
+        }
+    }
+}
+
+impl<T> DefaultVec<T>
+where
+    T: Default,
+{
+    #[inline]
+    pub fn get(&self, index: usize) -> Option<&T> {
+        self.raw.get(index)
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.raw.get_mut(index)
+    }
+
+    #[inline]
+    pub fn get_or_default(&self, index: usize) -> &T {
+        self.raw.get_or_default(index)
+    }
+}
+
+impl<T> IntoIterator for DefaultVec<T> {
+    type Item = T;
+    type IntoIter = IntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            raw: self.raw.iter(),
+            vec: self.raw,
+        }
+    }
+}
+
 /// A concurrent, append-only vector.
 ///
 /// See [the crate documentation](crate) for details.

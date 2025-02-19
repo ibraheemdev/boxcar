@@ -129,6 +129,40 @@ impl<T> Vec<T> {
     }
 
     /// Returns a reference to the element at the given index.
+    #[inline]
+    pub fn get_or_default(&self, index: usize) -> &T
+    where
+        T: Default,
+    {
+        let location = Location::of(index);
+
+        // Safety: `location.bucket` is always in bounds.
+        let bucket = unsafe { self.buckets.get_unchecked(location.bucket) };
+
+        // The `Acquire` load here synchronizes with the `Release`
+        // store in `Vec::get_or_alloc`.
+        let mut entries = bucket.entries.load(Ordering::Acquire);
+
+        // The bucket is uninitialized.
+        if entries.is_null() {
+            entries = Vec::get_or_alloc_default(bucket, location.bucket_len);
+        }
+
+        // Safety: `location.entry` is always in bounds for its bucket.
+        let entry = unsafe { &*entries.add(location.entry) };
+
+        if !entry.active.load(Ordering::Relaxed) {
+            // Let other threads know that this entry is active.
+            entry.active.store(true, Ordering::Release);
+        }
+
+        // Safety: The entry is active. Additionally, the `Acquire`
+        // load synchronizes with the `Release` store in `Vec::write`,
+        // ensuring the initialization happens-before this read.
+        unsafe { return entry.value_unchecked() }
+    }
+
+    /// Returns a reference to the element at the given index.
     ///
     /// # Safety
     ///
@@ -353,6 +387,40 @@ impl<T> Vec<T> {
         }
     }
 
+    /// Race to initialize a bucket.
+    ///
+    /// The returned pointer is guaranteed to be valid for access.
+    ///
+    /// Note that we avoid contention on bucket allocation by having a specified
+    /// writer eagerly allocate the next bucket.
+    #[cold]
+    #[inline(never)]
+    fn get_or_alloc_default(bucket: &Bucket<T>, len: usize) -> *mut Entry<T>
+    where
+        T: Default,
+    {
+        let entries = Bucket::alloc_default(len);
+
+        match bucket.entries.compare_exchange(
+            ptr::null_mut(),
+            entries,
+            // Establish synchronization with `Acquire` loads of the pointer.
+            Ordering::Release,
+            // If we lose the race, ensure that we synchronize with the initialization
+            // of the bucket that won.
+            Ordering::Acquire,
+        ) {
+            // We won the race.
+            Ok(_) => entries,
+
+            // We lost the race, deallocate our bucket and return the bucket that won.
+            Err(found) => unsafe {
+                Bucket::dealloc(entries, len);
+                found
+            },
+        }
+    }
+
     /// Reserves capacity for at least `additional` more elements to be inserted in
     /// the vector.
     ///
@@ -479,6 +547,21 @@ impl<T> Bucket<T> {
         let entries = (0..len)
             .map(|_| Entry::<T> {
                 slot: UnsafeCell::new(MaybeUninit::uninit()),
+                active: AtomicBool::new(false),
+            })
+            .collect::<Box<[Entry<_>]>>();
+
+        Box::into_raw(entries) as _
+    }
+
+    /// Allocate a bucket of the specified capacity.
+    fn alloc_default(len: usize) -> *mut Entry<T>
+    where
+        T: Default,
+    {
+        let entries = (0..len)
+            .map(|_| Entry::<T> {
+                slot: UnsafeCell::new(MaybeUninit::new(T::default())),
                 active: AtomicBool::new(false),
             })
             .collect::<Box<[Entry<_>]>>();
