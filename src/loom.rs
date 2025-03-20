@@ -63,11 +63,6 @@ mod inner {
 
         impl<T> UnsafeCell<T> {
             #[inline(always)]
-            pub const fn new(data: T) -> UnsafeCell<T> {
-                UnsafeCell(core::cell::UnsafeCell::new(data))
-            }
-
-            #[inline(always)]
             pub fn with<F, R>(&self, f: F) -> R
             where
                 F: FnOnce(*const T) -> R,
