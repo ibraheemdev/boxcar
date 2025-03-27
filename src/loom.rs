@@ -5,7 +5,7 @@ pub trait AtomicMut<T> {
     fn write_mut(&mut self, value: T);
 }
 
-#[cfg(loom)]
+#[cfg(all(test, loom))]
 mod inner {
     pub use loom::{cell, sync::atomic};
 
@@ -30,7 +30,7 @@ mod inner {
     }
 }
 
-#[cfg(not(loom))]
+#[cfg(not(all(test, loom)))]
 mod inner {
     pub use core::sync::atomic;
 
