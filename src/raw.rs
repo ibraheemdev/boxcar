@@ -11,21 +11,15 @@ use crate::loom::AtomicMut;
 
 use alloc::boxed::Box;
 
-#[cfg(target_has_atomic = "64")]
-type Inflight = crate::loom::atomic::AtomicU64;
-
-#[cfg(not(target_has_atomic = "64"))]
-type Inflight = crate::loom::atomic::AtomicUsize;
-
 /// A lock-free, append-only vector.
 pub struct Vec<T> {
     /// A counter used to retrieve a unique index to push to.
     ///
     /// This value may be more than the true length as it will
     /// be incremented before values are actually stored.
-    inflight: Inflight,
+    inflight: AtomicUsize,
 
-    /// Buckets of length 32, 64 .. 2^63.
+    /// Buckets of length 32, 64 .. 2^62.
     buckets: [Bucket<T>; BUCKETS],
 
     /// The number of initialized elements in this vector.
@@ -44,7 +38,7 @@ impl<T> Vec<T> {
     /// An empty vector.
     #[cfg(not(loom))]
     const EMPTY: Vec<T> = Vec {
-        inflight: Inflight::new(0),
+        inflight: AtomicUsize::new(0),
         buckets: [Bucket::EMPTY; BUCKETS],
         count: AtomicUsize::new(0),
     };
@@ -59,7 +53,7 @@ impl<T> Vec<T> {
     #[cfg(loom)]
     pub fn new() -> Vec<T> {
         Vec {
-            inflight: Inflight::new(0),
+            inflight: AtomicUsize::new(0),
             buckets: [0; BUCKETS].map(|_| Bucket {
                 entries: AtomicPtr::new(ptr::null_mut()),
             }),
@@ -209,29 +203,19 @@ impl<T> Vec<T> {
     /// Returns a unique index for insertion.
     #[inline]
     fn next_index(&self) -> usize {
-        #[cfg(target_has_atomic = "64")]
-        {
-            // The inflight counter is an `AtomicU64`, allowing it to catch capacity overflow.
-            //
-            // Note that the `Relaxed` ordering here is sufficient, as we only care about
-            // the index being unique and do not use it for synchronization.
-            let index = self.inflight.fetch_add(1, Ordering::Relaxed);
-            assert!(index <= (MAX_INDEX as u64), "capacity overflow");
-            index as usize
+        // The inflight counter cannot exceed `isize::MAX`, allowing it to catch capacity overflow.
+        //
+        // Note that the `Relaxed` ordering here is sufficient, as we only care about
+        // the index being unique and do not use it for synchronization.
+        let index = self.inflight.fetch_add(1, Ordering::Relaxed);
+        if index > MAX_INDEX {
+            // We could alternatively abort here, as `Arc` does. But we decrement and panic instead
+            // to keep in line with `Vec`'s behavior. Assuming that `isize::MAX` concurrent threads
+            // don't call this method, it is still impossible for it to overflow.
+            self.inflight.fetch_sub(1, Ordering::Relaxed);
+            panic!("capacity overflow");
         }
-
-        #[cfg(not(target_has_atomic = "64"))]
-        {
-            // We must use a CAS loop to avoid wrapping on overflow.
-            //
-            // The `Relaxed` ordering is sufficient for the same reason as above.
-            self.inflight
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |index| {
-                    assert!(index <= MAX_INDEX, "capacity overflow");
-                    Some(index + 1)
-                })
-                .unwrap()
-        }
+        index
     }
 
     /// Appends the element returned from the closure to the back of the vector
@@ -584,7 +568,7 @@ struct Location {
 
 /// The number of entries that are skipped from the start of a vector.
 ///
-/// Index calculations assume that buckets are of sizes `[2^0, 2^1, ..., 2^63]`.
+/// Index calculations assume that buckets are of sizes `[2^0, 2^1, ..., 2^62]`.
 /// To skip shorter buckets and avoid unnecessary location, the zeroeth entry
 /// index is remapped to a larger index (`2^0 + ... + 2^4 = 31`).
 const ZERO_ENTRY: usize = 31;
@@ -595,13 +579,18 @@ const ZERO_ENTRY: usize = 31;
 const ZERO_BUCKET: usize = (usize::BITS - ZERO_ENTRY.leading_zeros()) as usize;
 
 /// The number of buckets in a vector.
-const BUCKETS: usize = (usize::BITS as usize) - ZERO_BUCKET;
+const BUCKETS: usize = (usize::BITS as usize) - 1 - ZERO_BUCKET;
 
 /// The maximum index of an element in the vector.
 ///
 /// Note that capacity of the vector is:
-/// `2^ZERO_BUCKET + ... + 2^63 = usize::MAX - ZERO_INDEX`.
-const MAX_INDEX: usize = usize::MAX - ZERO_ENTRY - 1;
+/// `2^ZERO_BUCKET + ... + 2^62 = isize::MAX - ZERO_INDEX`.
+///
+/// We limit at `isize::MAX` instead of `usize::MAX` to allow checking for overflows in
+/// `next_index` using only `fetch_add`. In practice, you won't be able to make a `Vec` with this
+/// many elements unless it's a `Vec<()>` (since each entry adds one byte to `T`), and we don't
+/// particularly care to support that case.
+const MAX_INDEX: usize = (isize::MAX as usize) - ZERO_ENTRY - 1;
 
 impl Location {
     /// Returns the location of a given entry in a vector.
@@ -631,7 +620,7 @@ impl Location {
     #[inline]
     fn of_raw(index: usize) -> Location {
         // Calculate the bucket index based on ⌊log2(index)⌋.
-        let bucket = BUCKETS - ((index + 1).leading_zeros() as usize) - 1;
+        let bucket = BUCKETS - ((index + 1).leading_zeros() as usize);
         let bucket_len = Location::bucket_capacity(bucket);
 
         // Offset the absolute index by the capacity of the preceding buckets.
@@ -794,8 +783,8 @@ mod tests {
 
         let max = Location::of(MAX_INDEX);
         assert_eq!(max.bucket, BUCKETS - 1);
-        assert_eq!(max.bucket_len, 1 << (usize::BITS - 1));
-        assert_eq!(max.entry, (1 << (usize::BITS - 1)) - 1);
+        assert_eq!(max.bucket_len, 1 << (usize::BITS - 2));
+        assert_eq!(max.entry, (1 << (usize::BITS - 2)) - 1);
 
         let panic = std::panic::catch_unwind(|| Location::of(MAX_INDEX + 1)).unwrap_err();
         let panic = *panic.downcast_ref::<&'static str>().unwrap();
