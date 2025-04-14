@@ -79,7 +79,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: stable
-      - run: cargo test --test loom
+      - run: cargo test --test loom --features loom --release
         env:
           RUSTFLAGS: --cfg loom
 

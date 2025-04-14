@@ -42,7 +42,7 @@ unsafe impl<T: Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
     /// An empty vector.
-    #[cfg(not(all(test, loom)))]
+    #[cfg(not(loom))]
     const EMPTY: Vec<T> = Vec {
         inflight: Inflight::new(0),
         buckets: [Bucket::EMPTY; BUCKETS],
@@ -50,13 +50,13 @@ impl<T> Vec<T> {
     };
 
     /// Create an empty vector.
-    #[cfg(not(all(test, loom)))]
+    #[cfg(not(loom))]
     pub const fn new() -> Vec<T> {
         Vec::EMPTY
     }
 
     /// Create an empty vector.
-    #[cfg(all(test, loom))]
+    #[cfg(loom)]
     pub fn new() -> Vec<T> {
         Vec {
             inflight: Inflight::new(0),
@@ -462,7 +462,7 @@ struct Bucket<T> {
 
 impl<T> Bucket<T> {
     /// An empty bucket.
-    #[cfg(not(all(test, loom)))]
+    #[cfg(not(loom))]
     const EMPTY: Bucket<T> = Bucket {
         entries: AtomicPtr::new(ptr::null_mut()),
     };
@@ -490,7 +490,7 @@ impl<T> Bucket<T> {
     /// # Safety
     ///
     /// The provided length must be non-zero.
-    #[cfg(not(all(test, loom)))]
+    #[cfg(not(loom))]
     unsafe fn alloc(len: usize) -> *mut Entry<T> {
         let layout = Layout::array::<Entry<T>>(len).unwrap();
 
@@ -509,7 +509,7 @@ impl<T> Bucket<T> {
     }
 
     /// Allocate an array of entries of the specified length.
-    #[cfg(all(test, loom))]
+    #[cfg(loom)]
     unsafe fn alloc(len: usize) -> *mut Entry<T> {
         // Note we cannot use `alloc_zeroed` for Loom types.
         let entries = (0..len)
