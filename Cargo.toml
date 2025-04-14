@@ -23,11 +23,11 @@ harness = false
 
 [dependencies]
 
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.7", optional = true }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [dev-dependencies]
 criterion = "0.5"
-
-[target.'cfg(loom)'.dev-dependencies]
-loom = { version = "0.7" }
