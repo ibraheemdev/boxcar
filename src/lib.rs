@@ -5,7 +5,13 @@
 
 extern crate alloc;
 
+#[cfg(test)]
+extern crate std;
+
 mod loom;
+
+pub mod buckets;
+pub use buckets::Buckets;
 
 pub mod vec;
 pub use vec::Vec;

@@ -82,4 +82,7 @@ jobs:
       - run: cargo test --test loom --features loom --release
         env:
           RUSTFLAGS: --cfg loom
+      - run: cargo test --test loom_buckets --features loom --release
+        env:
+          RUSTFLAGS: --cfg loom
 
