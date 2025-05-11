@@ -15,3 +15,6 @@ pub use buckets::Buckets;
 
 pub mod vec;
 pub use vec::Vec;
+
+pub mod slotmap;
+pub use slotmap::SlotMap;
