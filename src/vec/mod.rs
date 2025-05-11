@@ -304,8 +304,8 @@ impl<T> Vec<T> {
     #[inline]
     pub fn iter(&self) -> Iter<'_, T> {
         Iter {
-            vec: &self.raw,
             raw: self.raw.iter(),
+            min_remaining: self.count(),
         }
     }
 
@@ -347,8 +347,8 @@ impl<T> IntoIterator for Vec<T> {
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            raw: self.raw.iter(),
-            vec: self.raw,
+            remaining: self.count(),
+            raw: self.raw.into_iter(),
         }
     }
 }
@@ -367,8 +367,8 @@ impl<'a, T> IntoIterator for &'a Vec<T> {
 /// This struct is created by the `into_iter` method on [`Vec`]
 /// (provided by the [`IntoIterator`] trait).
 pub struct IntoIter<T> {
-    vec: raw::Vec<T>,
-    raw: raw::Iter,
+    raw: raw::IntoIter<T>,
+    remaining: usize,
 }
 
 impl<T> Iterator for IntoIter<T> {
@@ -376,13 +376,14 @@ impl<T> Iterator for IntoIter<T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.raw.next_owned(&mut self.vec)
+        let (_, item) = self.raw.next()?;
+        self.remaining -= 1;
+        Some(item)
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = self.vec.count() - self.raw.yielded();
-        (remaining, Some(remaining))
+        (self.remaining, Some(self.remaining))
     }
 }
 
@@ -390,15 +391,15 @@ impl<T> Iterator for IntoIter<T> {
 ///
 /// See [`Vec::iter`] for details.
 pub struct Iter<'a, T> {
-    vec: &'a raw::Vec<T>,
-    raw: raw::Iter,
+    raw: raw::Iter<'a, T>,
+    min_remaining: usize,
 }
 
 impl<'a, T> Clone for Iter<'a, T> {
     fn clone(&self) -> Iter<'a, T> {
         Iter {
-            vec: self.vec,
             raw: self.raw.clone(),
+            min_remaining: self.min_remaining,
         }
     }
 }
@@ -408,12 +409,14 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.raw.next_shared(self.vec)
+        let item = self.raw.next()?;
+        self.min_remaining = self.min_remaining.saturating_sub(1);
+        Some(item)
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.vec.count() - self.raw.yielded(), None)
+        (self.min_remaining, None)
     }
 }
 
