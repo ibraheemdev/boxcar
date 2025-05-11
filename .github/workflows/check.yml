@@ -59,6 +59,7 @@ jobs:
         with:
           reporter: 'github-pr-check'
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          clippy_flags: --all-features
   semver:
     runs-on: ubuntu-latest
     name: semver
@@ -112,7 +113,7 @@ jobs:
     # https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability
     strategy:
       matrix:
-        msrv: ["1.72.0"]
+        msrv: ["1.81.0"]
     name: ubuntu / ${{ matrix.msrv }}
     steps:
       - uses: actions/checkout@v4

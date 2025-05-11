@@ -67,7 +67,7 @@ jobs:
           toolchain: ${{ env.NIGHTLY }}
           components: miri
       - name: cargo miri test
-        run: cargo miri test
+        run: cargo miri test --all-features
   loom:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -80,6 +80,12 @@ jobs:
         with:
           toolchain: stable
       - run: cargo test --test loom --features loom --release
+        env:
+          RUSTFLAGS: --cfg loom
+      - run: cargo test --test loom_buckets --features loom --release
+        env:
+          RUSTFLAGS: --cfg loom
+      - run: cargo test --test loom_slotmap --features loom --release
         env:
           RUSTFLAGS: --cfg loom
 
