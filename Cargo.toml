@@ -1,6 +1,6 @@
 [package]
 name = "boxcar"
-version = "0.2.11"
+version = "0.2.12"
 authors = ["Ibraheem Ahmed <ibraheem@ibraheem.ca>"]
 edition = "2021"
 license = "MIT"
