@@ -48,6 +48,24 @@ fn read_write() {
 }
 
 #[test]
+fn iter_linearizability() {
+    loom::model(|| {
+        let vec = Arc::new(boxcar::Vec::new());
+        let v1 = vec.clone();
+        let v2 = vec.clone();
+
+        let t1 = thread::spawn(move || v1.push(1));
+        let t2 = thread::spawn(move || {
+            v2.push(2);
+            assert!(v2.iter().find(|&(_, x)| *x == 2).is_some());
+        });
+
+        t1.join().unwrap();
+        t2.join().unwrap();
+    });
+}
+
+#[test]
 fn mixed() {
     loom::model(|| {
         let vec = Arc::new(boxcar::Vec::new());
