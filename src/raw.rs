@@ -26,13 +26,15 @@ pub struct Vec<T> {
     count: AtomicUsize,
 }
 
-/// Safety: A `Vec` owns its elements, so sending a
-/// vector also sends its elements, hence `T: Send`.
+/// Safety: A `Vec` is owned and owns its elements, so sending a
+/// vector only sends its elements, hence `T: Send`.
 unsafe impl<T: Send> Send for Vec<T> {}
 
-/// Safety: Sharing a `Vec` only exposes shared access
-/// to the elements inside, so we only require `T: Sync`.
-unsafe impl<T: Sync> Sync for Vec<T> {}
+/// Safety: Sharing a `Vec` exposes shared access to the
+/// elements inside, hence `T: Sync`. Additionally, a `Vec`
+/// may act as a channel, exposing owned access of elements
+/// to other threads, hence we also require `T: Send`.
+unsafe impl<T: Send + Sync> Sync for Vec<T> {}
 
 impl<T> Vec<T> {
     /// An empty vector.
