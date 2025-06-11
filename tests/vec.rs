@@ -87,6 +87,16 @@ fn clear() {
 }
 
 #[test]
+fn fused_iterator() {
+    let vec = boxcar::vec![0, 1, 2];
+    assert_eq!(vec.iter().collect::<Vec<_>>(), [(0, &0), (1, &1), (2, &2)]);
+
+    let iter = vec.iter();
+    vec.push(3);
+    assert_eq!(iter.collect::<Vec<_>>(), [(0, &0), (1, &1), (2, &2)]);
+}
+
+#[test]
 fn stress() {
     let vec = boxcar::Vec::new();
     let barrier = Barrier::new(6);

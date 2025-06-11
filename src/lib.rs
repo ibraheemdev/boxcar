@@ -9,6 +9,7 @@ mod loom;
 mod raw;
 
 use core::fmt;
+use core::iter::FusedIterator;
 use core::ops::Index;
 
 /// Creates a [`Vec`] containing the given elements.
@@ -392,11 +393,16 @@ impl<T> Iterator for IntoIter<T> {
 
 /// An iterator over the elements of a [`Vec<T>`].
 ///
+/// Note that the iterator is [fused](FusedIterator) on creation, and
+/// will not continue to check for concurrently inserted elements.
+///
 /// See [`Vec::iter`] for details.
 pub struct Iter<'a, T> {
     vec: &'a raw::Vec<T>,
     raw: raw::Iter,
 }
+
+impl<T> FusedIterator for Iter<'_, T> {}
 
 impl<'a, T> Clone for Iter<'a, T> {
     fn clone(&self) -> Iter<'a, T> {
