@@ -92,6 +92,25 @@ impl<T> Vec<T> {
     /// Returns a reference to the element at the given index.
     #[inline]
     pub fn get(&self, index: usize) -> Option<&T> {
+        self.get_raw(index)
+            // SAFETY: The entry returned by `get_raw` is guaranteed to be initialized.
+            .map(|entry| unsafe { (*entry).value_unchecked() })
+    }
+
+    /// Returns a mutable reference to the element at the given index.
+    #[inline]
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        self.get_raw(index)
+            // SAFETY: The entry returned by `get_raw` is guaranteed to be
+            // initialized, and we have `&mut self`.
+            .map(|entry| unsafe { (*entry).value_unchecked_mut() })
+    }
+
+    /// Returns a pointer to the element at the given index.
+    ///
+    /// If `Some`, the returned pointer is guaranteed to be initialized.
+    #[inline]
+    fn get_raw(&self, index: usize) -> Option<*mut Entry<T>> {
         let location = Location::of(index);
 
         // Safety: `location.bucket` is always in bounds.
@@ -111,13 +130,14 @@ impl<T> Vec<T> {
         }
 
         // Safety: `location.entry` is always in bounds for its bucket.
-        let entry = unsafe { &*entries.add(location.entry) };
+        let entry = unsafe { entries.add(location.entry) };
 
-        if entry.active.load(Ordering::Acquire) {
+        // Safety: All entries are zero-initialized.
+        if unsafe { (*entry).active.load(Ordering::Acquire) } {
             // Safety: The entry is active. Additionally, the `Acquire`
             // load synchronizes with the `Release` store in `Vec::write`,
             // ensuring the initialization happens-before this read.
-            unsafe { return Some(entry.value_unchecked()) }
+            return Some(entry);
         }
 
         // The entry is uninitialized.
@@ -146,36 +166,6 @@ impl<T> Vec<T> {
 
             (*entry).value_unchecked()
         }
-    }
-
-    /// Returns a mutable reference to the element at the given index.
-    #[inline]
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        let location = Location::of(index);
-
-        // Safety: `location.bucket` is always in bounds.
-        let entries = unsafe {
-            self.buckets
-                .get_unchecked_mut(location.bucket)
-                .entries
-                .read_mut()
-        };
-
-        // The bucket is uninitialized.
-        if entries.is_null() {
-            return None;
-        }
-
-        // Safety: `location.entry` is always in bounds for its bucket.
-        let entry = unsafe { &mut *entries.add(location.entry) };
-
-        if entry.active.read_mut() {
-            // Safety: The entry is active.
-            unsafe { return Some(entry.value_unchecked_mut()) }
-        }
-
-        // The entry is uninitialized.
-        None
     }
 
     /// Returns a mutable reference to the element at the given index.
@@ -389,11 +379,13 @@ impl<T> Vec<T> {
         Iter {
             index: 0,
             yielded: 0,
-            location: Location {
-                bucket: 0,
-                entry: 0,
-                bucket_len: Location::bucket_capacity(0),
-            },
+            // Snapshot the number of potentially active entries when the iterator is
+            // created, so we know how many entries we have to check. The alternative
+            // is to always check every single entry and/or bucket. Note that yielding
+            // `self.count` entries is not enough; we may end up yielding the *wrong*
+            // `self.count` entries, as the gaps in-between the entries we want to yield
+            // may get filled concurrently.
+            inflight: core::cmp::min(self.inflight.load(Ordering::Relaxed), MAX_INDEX),
         }
     }
 
@@ -643,65 +635,29 @@ impl Location {
 /// An iterator over the elements of a [`Vec<T>`].
 #[derive(Clone)]
 pub struct Iter {
-    location: Location,
     yielded: usize,
+    inflight: usize,
     index: usize,
 }
 
 impl Iter {
     /// Returns a pointer to the next entry in the iterator.
     ///
-    /// Any returned entries are guaranteed to be initialized.
+    /// Note that the iterator is fused, and any returned entries are guaranteed
+    /// to be initialized.
     #[inline]
     fn next<T>(&mut self, vec: &Vec<T>) -> Option<(usize, *mut Entry<T>)> {
-        // We returned every entry in the vector, we're done.
-        if self.yielded == vec.count() {
-            return None;
-        }
+        // Checked every entry in the vector that was potentially initialized when
+        // this iterator was created.
+        while self.index < self.inflight {
+            let index = self.index;
+            self.index += 1;
 
-        // It is possible that the the length was incremented due to an element
-        // being stored in a bucket that we have already iterated over, so we
-        // still have to check that we are in bounds.
-        while self.location.bucket < BUCKETS {
-            // Safety: Bounds checked above.
-            let entries = unsafe {
-                vec.buckets
-                    .get_unchecked(self.location.bucket)
-                    .entries
-                    .load(Ordering::Acquire)
+            let Some(entry) = vec.get_raw(index) else {
+                continue;
             };
 
-            // Despite this bucket not being initialized, it is possible, but rare,
-            // that a subsequent bucket was initialized before this one. Thus we
-            // have to continue checking every bucket until we yield `vec.count()`
-            // elements.
-            if !entries.is_null() {
-                while self.location.entry < self.location.bucket_len {
-                    // Safety: Bounds checked above.
-                    let entry = unsafe { entries.add(self.location.entry) };
-                    let index = self.index;
-
-                    self.location.entry += 1;
-                    self.index += 1;
-
-                    // Continue even after we find an uninitialized entry for the same
-                    // reason as uninitialized buckets.
-                    //
-                    // Note that the `Acquire` ordering ensures that the initialization
-                    // of the value happens-before this read if we yield the entry.
-                    if unsafe { (*entry).active.load(Ordering::Acquire) } {
-                        self.yielded += 1;
-                        return Some((index, entry));
-                    }
-                }
-            }
-
-            // We iterated over an entire bucket, move on to the next one.
-            self.location.entry = 0;
-            self.location.bucket += 1;
-            if self.location.bucket < BUCKETS {
-                self.location.bucket_len = Location::bucket_capacity(self.location.bucket);
-            }
+            return Some((index, entry));
         }
 
         None
