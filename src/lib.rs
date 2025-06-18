@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![deny(unsafe_op_in_unsafe_fn)]
-#![allow(clippy::needless_doctest_main)]
+#![allow(clippy::needless_doctest_main, clippy::ok_expect)]
 #![no_std]
 
 extern crate alloc;
@@ -168,11 +168,32 @@ impl<T> Vec<T> {
     /// assert_eq!(vec, [0, 1, 2]);
     /// ```
     #[inline]
-    pub fn push_with<F>(&self, f: F) -> usize
+    pub fn push_with<F>(&self, create: F) -> usize
     where
         F: FnOnce(usize) -> T,
     {
-        self.raw.push_with(f)
+        self.raw.push_with(create)
+    }
+
+    /// Appends `count` elements to the back of the vector, initializing each
+    /// element with the closure called with the index of the given element.
+    ///
+    /// The indices passed to the closure are guaranteed to be in sequential order,
+    /// and the first index that was created is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec = boxcar::vec![0, 1];
+    /// vec.push_many(3, |index| index);
+    /// assert_eq!(vec, [0, 1, 2, 3, 4]);
+    /// ```
+    #[inline]
+    pub fn push_many<F>(&self, count: usize, create: F) -> usize
+    where
+        F: FnMut(usize) -> T,
+    {
+        self.raw.push_many(count, create)
     }
 
     /// Returns the number of elements in the vector.
