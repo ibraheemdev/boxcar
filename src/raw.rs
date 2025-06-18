@@ -210,29 +210,68 @@ impl<T> Vec<T> {
         index
     }
 
+    /// Appends an element to the back of the vector.
+    #[inline]
+    pub fn push(&self, value: T) -> usize {
+        // Safety: `next_index` is always in-bounds and unique.
+        unsafe { self.write(self.next_index(), value) }
+    }
+
     /// Appends the element returned from the closure to the back of the vector
     /// at the index represented by the `usize` passed to closure.
     ///
     /// This allows for use of the would-be index to be utilized within the
     /// element.
     #[inline]
-    pub fn push_with<F>(&self, f: F) -> usize
+    pub fn push_with<F>(&self, create: F) -> usize
     where
         F: FnOnce(usize) -> T,
     {
         // Acquire a unique index to insert into.
         let index = self.next_index();
-        let value = f(index);
+        let value = create(index);
 
         // Safety: `next_index` is always in-bounds and unique.
         unsafe { self.write(index, value) }
     }
 
-    /// Appends an element to the back of the vector.
+    /// Appends `count` elements to the back of the vector, initializing each
+    /// element with the closure called with the index of the given element.
+    ///
+    /// The indices passed to the closure are guaranteed to be in sequential order,
+    /// and the first index that was created is returned.
     #[inline]
-    pub fn push(&self, value: T) -> usize {
-        // Safety: `next_index` is always in-bounds and unique.
-        unsafe { self.write(self.next_index(), value) }
+    pub fn push_many<F>(&self, count: usize, mut create: F) -> usize
+    where
+        F: FnMut(usize) -> T,
+    {
+        let index = self
+            .inflight
+            // Note that the `Relaxed` ordering here is sufficient, as we only care about
+            // the index being unique and do not use it for synchronization.
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |index| {
+                // Ensure the next index does not overflow.
+                let next_index = index.checked_add(count)?;
+
+                // Ensure that the final index we are creating is in-bounds.
+                if (next_index - 1) > MAX_INDEX {
+                    return None;
+                }
+
+                Some(next_index)
+            })
+            .ok()
+            .expect("capacity overflow");
+
+        for index in index..index + count {
+            let value = create(index);
+
+            // Safety: We uniquely claimed every every index from `index..index + count`
+            // and ensured that they are in-bounds.
+            unsafe { self.write(index, value) };
+        }
+
+        index
     }
 
     /// Write an element at the given index.
