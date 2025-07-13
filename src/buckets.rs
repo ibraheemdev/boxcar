@@ -4,6 +4,7 @@
 use ::alloc::alloc::{self, alloc_zeroed, handle_alloc_error};
 use ::alloc::boxed::Box;
 use ::alloc::vec::{self, Vec};
+use core::cmp;
 use core::fmt::{self, Debug, Formatter};
 use core::hint::assert_unchecked;
 use core::iter::FusedIterator;
@@ -20,11 +21,6 @@ use crate::loom::AtomicMut as _;
 ///
 /// The `BUCKETS` generic parameter controls the maximum capacity, and the inline size, of the
 /// type. See [`buckets_for_index_bits`] for a convenient way to calculate its desired value.
-///
-/// # Notes
-///
-/// This type is potentially quite large, so it is advised to put it behind a `Box` or `Arc` or
-/// similar.
 pub struct Buckets<T, const BUCKETS: usize> {
     buckets: [AtomicPtr<T>; BUCKETS],
 }
@@ -347,9 +343,9 @@ impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
     /// let mut buckets = <Buckets<u8, 5>>::new();
     ///
     /// let index = buckets::Index::new(48).unwrap();
-    /// assert_eq!(*buckets.get_mut_or_alloc(index), 0);
+    /// assert_eq!(*buckets.get_or_alloc_mut(index), 0);
     ///
-    /// *buckets.get_mut_or_alloc(index) += 3;
+    /// *buckets.get_or_alloc_mut(index) += 3;
     /// assert_eq!(*buckets.get(index).unwrap(), 3);
     ///
     /// // Prior indices are not necessary allocated.
@@ -359,7 +355,7 @@ impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
     /// # Panics
     ///
     /// May panic if `index` is too large or allocation fails.
-    pub fn get_mut_or_alloc(&mut self, index: Index<BUCKETS>) -> &mut T
+    pub fn get_or_alloc_mut(&mut self, index: Index<BUCKETS>) -> &mut T
     where
         T: MaybeZeroable,
     {
@@ -608,6 +604,9 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
     ///
     /// Returns `None` if the index is out of bounds. All indices up to a certain unspecified point
     /// are in bounds.
+    ///
+    /// If [`buckets_for_index_bits`] is used, this function is guaranteed to reject values greater
+    /// than `2 ^ bits`, but may also reject smaller values.
     pub const fn new(i: usize) -> Option<Self> {
         if i < Self::ENTRIES {
             // Safety: What we just checked.
@@ -644,8 +643,8 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
 
     /// Construct a new `Index`, returning the maximum index if it is out-of-bounds.
     pub fn new_saturating(i: usize) -> Self {
-        // Panics: Ord::min(i, Self::ENTRIES - 1) ≤ Self::ENTRIES - 1 < Self::ENTRIES
-        Self::new(Ord::min(i, Self::ENTRIES - 1)).unwrap()
+        // Panics: cmp::min(i, Self::ENTRIES - 1) ≤ Self::ENTRIES - 1 < Self::ENTRIES
+        Self::new(cmp::min(i, Self::ENTRIES - 1)).unwrap()
     }
 
     /// Get the index passed into [`Self::new`].
@@ -736,7 +735,9 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         // ⇔ -entry ≤ 0 < i + 1 - 2 * entry
         // ⇔ 0 ≤ entry and entry < i + 1 - entry = 2 ^ b
         //
-        // We can thus set `b = floor(log2(i + 1)) = floor(log2(self.inner)) = self.inner.ilog2()`.
+        // Which holds by definition of `entry`. We can thus set `b = floor(log2(i + 1))
+        //
+        //= floor(log2(self.inner)) = self.inner.ilog2()`.
         let b = self.inner.ilog2();
 
         // The compiler can tell that this conversion never fails, so we just unwrap.
@@ -897,15 +898,10 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         // The compiler knows this, so we just unwrap.
         let inner_minus_one = self.into_raw().get().checked_sub(1).unwrap();
 
-        // Construct a `NonZero` to avoid bounds checks in `ilog2`.
-        // Panics: `SKIPPED_BUCKETS` is at least 1, meaning that `2 ≤ self.inner`.
-        let inner_minus_one = NonZero::new(inner_minus_one).unwrap();
-
         // Calculate the bucket cursor index, which is the index of the first non-lower bucket.
         //
         // bucket = b - SKIPPED_BUCKETS
         //        = floor(log2(self.inner - 1)) + 1 - SKIPPED_BUCKETS
-        //        = floor(log2(self.inner - 1)) - (SKIPPED_BUCKETS - 1)
         //
         // We do the calculation in this order to ensure that overflow does not occur,
         // again relying on `1 ≤ SKIPPED_BUCKETS`:
@@ -914,10 +910,11 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         //                   ≤ log2(self.inner)
         //                   ≤ ceil(log2(self.inner))
         //                   = floor(log2(self.inner - 1)) + 1
-        // ⇒ 0 ≤ floor(log2(self.inner - 1)) - (SKIPPED_BUCKETS - 1)
+        // ⇒ 0 ≤ floor(log2(self.inner - 1)) + 1 - SKIPPED_BUCKETS
         //
+        // Panics (ilog2): `SKIPPED_BUCKETS` is at least 1, meaning that `2 ≤ self.inner`.
         // The compiler can tell that `ilog2` always gives a valid `usize`, so we just unwrap.
-        let bucket = usize::try_from(inner_minus_one.ilog2()).unwrap() - (SKIPPED_BUCKETS - 1);
+        let bucket = usize::try_from(inner_minus_one.ilog2()).unwrap() + 1 - SKIPPED_BUCKETS;
 
         BucketCursor(bucket)
     }
@@ -1117,7 +1114,7 @@ impl<T, const BUCKETS: usize> Iterator for IntoIter<T, BUCKETS> {
             // Skip over unallocated buckets. We need to check every bucket since it's possible
             // later buckets got allocated first.
             if let Some(bucket) = self.buckets.take_bucket(bucket_index) {
-                self.iter = Vec::from(bucket).into_iter();
+                self.iter = IntoIterator::into_iter(bucket);
                 self.index = bucket_index.first().into_raw().get();
             }
         }
