@@ -27,16 +27,6 @@ pub struct Vec<T> {
     count: AtomicUsize,
 }
 
-/// Safety: A `Vec` is owned and owns its elements, so sending a
-/// vector only sends its elements, hence `T: Send`.
-unsafe impl<T: Send> Send for Vec<T> {}
-
-/// Safety: Sharing a `Vec` exposes shared access to the
-/// elements inside, hence `T: Sync`. Additionally, a `Vec`
-/// may act as a channel, exposing owned access of elements
-/// to other threads, hence we also require `T: Send`.
-unsafe impl<T: Send + Sync> Sync for Vec<T> {}
-
 impl<T> Vec<T> {
     /// Create an empty vector.
     #[cfg(not(loom))]
@@ -321,6 +311,16 @@ unsafe impl<T> MaybeZeroable for Entry<T> {
         cfg!(not(loom))
     }
 }
+
+// Safety: An `Entry` is owned and owns its data, so sending an
+// entry only sends that data, hence `T: Send`.
+unsafe impl<T: Send> Send for Entry<T> {}
+
+// Safety: Sharing an `Entry` exposes shared access to the
+// data inside, hence `T: Sync`. Additionally, the `Entry`
+// may act as a channel, exposing owned access of elements
+// to other threads, hence we also require `T: Send`.
+unsafe impl<T: Send + Sync> Sync for Entry<T> {}
 
 impl<T> Entry<T> {
     /// Returns a reference to the value in this entry.
