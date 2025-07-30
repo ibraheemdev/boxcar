@@ -41,8 +41,11 @@ impl<T> Vec<T> {
     /// Create an empty vector.
     #[cfg(not(loom))]
     pub const fn new() -> Vec<T> {
+        let Some(zero) = <buckets::Index<BUCKETS>>::new(0) else {
+            unreachable!();
+        };
         Vec {
-            inflight: AtomicUsize::new(<buckets::Index<BUCKETS>>::new(0).unwrap().into_raw().get()),
+            inflight: AtomicUsize::new(zero.into_raw().get()),
             buckets: Buckets::new(),
             count: AtomicUsize::new(0),
         }

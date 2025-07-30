@@ -4,7 +4,7 @@ version = "0.2.13"
 authors = ["Ibraheem Ahmed <ibraheem@ibraheem.ca>"]
 edition = "2021"
 license = "MIT"
-rust-version = "1.81.0"
+rust-version = "1.72.0"
 
 readme = "README.md"
 description = "A concurrent, append-only vector"

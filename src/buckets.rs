@@ -6,9 +6,10 @@ use ::alloc::boxed::Box;
 use ::alloc::vec::{self, Vec};
 use core::cmp;
 use core::fmt::{self, Debug, Formatter};
-use core::hint::assert_unchecked;
+use core::hint::unreachable_unchecked;
 use core::iter::FusedIterator;
-use core::num::NonZero;
+use core::mem::size_of;
+use core::num::NonZeroUsize;
 use core::ptr;
 use core::slice;
 use core::sync::atomic;
@@ -40,11 +41,15 @@ unsafe impl<T: Send, const BUCKETS: usize> Send for Buckets<T, BUCKETS> {}
 unsafe impl<T: Sync, const BUCKETS: usize> Sync for Buckets<T, BUCKETS> {}
 
 impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
+    #[cfg(not(loom))]
+    #[allow(clippy::declare_interior_mutable_const)]
+    const NULL_PTR: AtomicPtr<T> = AtomicPtr::new(ptr::null_mut());
+
     /// Construct a new, empty, `Buckets`.
     #[cfg(not(loom))]
     pub const fn new() -> Self {
         Self {
-            buckets: [const { AtomicPtr::new(ptr::null_mut()) }; BUCKETS],
+            buckets: [Self::NULL_PTR; BUCKETS],
         }
     }
 
@@ -485,7 +490,7 @@ unsafe impl MaybeZeroable for u16 {
 #[cold]
 #[inline(never)]
 #[must_use]
-fn allocate_race_and_get<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZero<usize>) -> *const T {
+fn allocate_race_and_get<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZeroUsize) -> *const T {
     // Panics: Ensured by caller.
     let ptr = Box::into_raw(allocate_slice::<T>(len));
 
@@ -514,7 +519,7 @@ fn allocate_race_and_get<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZero<u
 /// `len * size_of::<T>()` must not overflow an `isize`.
 #[cold]
 #[inline(never)]
-fn allocate_race<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZero<usize>) {
+fn allocate_race<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZeroUsize) {
     // Panics: Ensured by caller.
     let ptr = Box::into_raw(allocate_slice::<T>(len));
 
@@ -539,7 +544,7 @@ fn allocate_race<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZero<usize>) {
 /// # Panics
 ///
 /// `len * size_of::<T>()` must not overflow an `isize`.
-fn allocate_slice<T: MaybeZeroable>(len: NonZero<usize>) -> Box<[T]> {
+fn allocate_slice<T: MaybeZeroable>(len: NonZeroUsize) -> Box<[T]> {
     if size_of::<T>() == 0 {
         return Box::new([]);
     }
@@ -548,7 +553,7 @@ fn allocate_slice<T: MaybeZeroable>(len: NonZero<usize>) -> Box<[T]> {
         // Panics: Ensured by caller.
         let layout = alloc::Layout::array::<T>(len.get()).unwrap();
 
-        // Safety: `len` is a `NonZero<usize>`, and we just ensured that `T` is not zero-sized.
+        // Safety: `len` is a `NonZeroUsize`, and we just ensured that `T` is not zero-sized.
         // Therefore, `layout` has a non-zero size.
         let ptr = unsafe { alloc_zeroed(layout) }.cast::<T>();
 
@@ -570,7 +575,7 @@ pub struct Index<const BUCKETS: usize> {
     /// The original index plus `SKIPPED_ENTRIES` plus one.
     ///
     /// Invariant: `SKIPPED_ENTRIES < inner ≤ ENTRIES_WITH_SKIPPED`.
-    inner: NonZero<usize>,
+    inner: NonZeroUsize,
 }
 
 /// To avoid small allocations, we skip a number of small buckets at the start.
@@ -624,19 +629,25 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
     pub const unsafe fn new_unchecked(i: usize) -> Self {
         // Safety: Ensured by the caller.
         // We use this to elide bounds checks below.
-        unsafe { assert_unchecked(i < Self::ENTRIES) };
+        if i >= Self::ENTRIES {
+            unsafe { unreachable_unchecked() };
+        }
 
         // Panics: This addition never overflows:
         //   i < ENTRIES
         // ⇒ i < ENTRIES_WITH_SKIPPED - SKIPPED_ENTRIES ≤ usize::MAX - SKIPPED_ENTRIES
         // ⇒ i + SKIPPED_ENTRIES < usize::MAX
         // ⇒ i + SKIPPED_ENTRIES + 1 ≤ usize::MAX
-        // The compiler can tell this, so we just unwrap.
-        let inner = i.checked_add(SKIPPED_ENTRIES + 1).unwrap();
+        // The compiler can tell this, so we just panic.
+        let Some(inner) = i.checked_add(SKIPPED_ENTRIES + 1) else {
+            unreachable!()
+        };
 
         // Panics: `inner` is always nonzero, since we just added one to it and didn't overflow.
-        // Because we use `checked_add`, the compiler can tell this, so we just unwrap.
-        let inner = NonZero::new(inner).unwrap();
+        // Because we use `checked_add`, the compiler can tell this, so we just panic.
+        let Some(inner) = NonZeroUsize::new(inner) else {
+            unreachable!()
+        };
 
         Self { inner }
     }
@@ -658,7 +669,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
     /// provided if [`buckets_for_index_bits`] is used.
     ///
     /// Indices are guaranteed to be represented contiguously.
-    pub const fn into_raw(self) -> NonZero<usize> {
+    pub const fn into_raw(self) -> NonZeroUsize {
         // Assert the invariants of the type.
         debug_assert!(SKIPPED_ENTRIES < self.inner.get());
         debug_assert!(self.inner.get() <= Self::ENTRIES_WITH_SKIPPED);
@@ -678,7 +689,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         debug_assert!(inner <= Self::ENTRIES_WITH_SKIPPED);
 
         // Panics: Ensured by caller.
-        let inner = unsafe { NonZero::new_unchecked(inner) };
+        let inner = unsafe { NonZeroUsize::new_unchecked(inner) };
         Self { inner }
     }
 
@@ -748,7 +759,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         // Since `b` is the result of an `ilog2`, we know this can never overflow. The compiler
         // knows this, so we just unwrap. Since the operation doesn't overflow and starts with `1`,
         // we also know the result is nonzero. The compiler also knows this, so we just unwrap.
-        let bucket_len = NonZero::new(1_usize.checked_shl(b).unwrap()).unwrap();
+        let bucket_len = NonZeroUsize::new(1_usize.checked_shl(b).unwrap()).unwrap();
 
         // Recall that: i + 1 - entry = 2 ^ b
         // Therefore: entry = i + 1 - 2 ^ b = self.inner - bucket_len
@@ -801,7 +812,7 @@ struct Location<const BUCKETS: usize> {
     /// Which bucket the value is in.
     bucket: BucketIndex<BUCKETS>,
     /// How many entries are in this bucket.
-    bucket_len: NonZero<usize>,
+    bucket_len: NonZeroUsize,
     /// The index of the entry within the bucket's array. Less than `bucket_len`.
     entry: usize,
 }
@@ -822,7 +833,9 @@ impl<const BUCKETS: usize> BucketIndex<BUCKETS> {
         // ⇔ inner = 2 ^ (bucket + SKIPPED_BUCKETS)
 
         // Safety: This is the invariant of the type.
-        unsafe { assert_unchecked(self.0 < BUCKETS) };
+        if self.0 >= BUCKETS {
+            unsafe { unreachable_unchecked() };
+        }
 
         // All of these operations can be proven by the compiler not to overflow because of the
         // above assert; hence, we just unwrap freely knowing that it'll be eliminated.
@@ -832,7 +845,7 @@ impl<const BUCKETS: usize> BucketIndex<BUCKETS> {
     }
 
     /// Get the length of the bucket.
-    fn len(self) -> NonZero<usize> {
+    fn len(self) -> NonZeroUsize {
         // self.first() computes `2 ^ (bucket + SKIPPED_BUCKETS)`, which is also the bucket length.
         self.first().into_raw()
     }
@@ -1114,7 +1127,7 @@ impl<T, const BUCKETS: usize> Iterator for IntoIter<T, BUCKETS> {
             // Skip over unallocated buckets. We need to check every bucket since it's possible
             // later buckets got allocated first.
             if let Some(bucket) = self.buckets.take_bucket(bucket_index) {
-                self.iter = IntoIterator::into_iter(bucket);
+                self.iter = Vec::from(bucket).into_iter();
                 self.index = bucket_index.first().into_raw().get();
             }
         }
@@ -1146,14 +1159,14 @@ mod tests {
     }
     impl Drop for Helper {
         fn drop(&mut self) {
-            COUNTER.set(COUNTER.get() + 1);
+            COUNTER.with(|c| c.set(c.get() + 1));
         }
     }
 
     fn drops_with(f: impl FnOnce()) -> usize {
-        COUNTER.set(0);
+        COUNTER.with(|c| c.set(0));
         f();
-        COUNTER.get()
+        COUNTER.with(|c| c.get())
     }
 
     fn drops<const BUCKETS: usize>(buckets: Buckets<Helper, BUCKETS>) -> usize {

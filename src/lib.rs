@@ -15,3 +15,9 @@ pub use buckets::Buckets;
 
 pub mod vec;
 pub use vec::Vec;
+
+// Reexports for backward compatibility.
+#[doc(hidden)]
+pub use vec::IntoIter;
+#[doc(hidden)]
+pub use vec::Iter;
