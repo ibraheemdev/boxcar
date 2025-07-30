@@ -10,6 +10,7 @@ use core::hint::unreachable_unchecked;
 use core::iter::FusedIterator;
 use core::mem::size_of;
 use core::num::NonZeroUsize;
+use core::panic::{RefUnwindSafe, UnwindSafe};
 use core::ptr;
 use core::slice;
 use core::sync::atomic;
@@ -39,6 +40,10 @@ unsafe impl<T: Send, const BUCKETS: usize> Send for Buckets<T, BUCKETS> {}
 // - `T: Sync` is required because we provide shared access to the data in the buckets from a
 //   shared reference.
 unsafe impl<T: Sync, const BUCKETS: usize> Sync for Buckets<T, BUCKETS> {}
+
+// Since we act like we own a `T`, we inherit its unwind-safety-ness.
+impl<T: UnwindSafe, const BUCKETS: usize> UnwindSafe for Buckets<T, BUCKETS> {}
+impl<T: RefUnwindSafe, const BUCKETS: usize> RefUnwindSafe for Buckets<T, BUCKETS> {}
 
 impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
     #[cfg(not(loom))]

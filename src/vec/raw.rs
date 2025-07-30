@@ -2,6 +2,7 @@
 
 use core::mem::{self, MaybeUninit};
 use core::ops::Index;
+use core::panic::RefUnwindSafe;
 use core::ptr;
 
 use crate::buckets::{self, buckets_for_index_bits, Buckets, MaybeZeroable};
@@ -321,6 +322,11 @@ unsafe impl<T: Send> Send for Entry<T> {}
 // may act as a channel, exposing owned access of elements
 // to other threads, hence we also require `T: Send`.
 unsafe impl<T: Send + Sync> Sync for Entry<T> {}
+
+// In an ideal world, we might require `T: UnwindSafe + RefUnwindSafe`
+// here, with similar reasoning to above. But this is here for backward
+// compatibility. Also, who ever worried about unwind safety :P
+impl<T> RefUnwindSafe for Entry<T> {}
 
 impl<T> Entry<T> {
     /// Returns a reference to the value in this entry.
