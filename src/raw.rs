@@ -410,8 +410,17 @@ impl<T> Index<usize> for Vec<T> {
 
     #[inline]
     fn index(&self, index: usize) -> &Self::Output {
-        self.get(index)
-            .unwrap_or_else(|| panic!("index `{index}` is uninitialized"))
+        #[cold]
+        #[inline(never)]
+        fn assert_failed(index: usize) -> ! {
+            panic!("index {index} is uninitialized");
+        }
+
+        if let Some(value) = self.get(index) {
+            return value;
+        }
+
+        assert_failed(index)
     }
 }
 
@@ -592,8 +601,14 @@ impl Location {
     /// This function will panic if the entry is greater than `MAX_INDEX`.
     #[inline]
     fn of(index: usize) -> Location {
+        #[cold]
+        #[inline(never)]
+        fn assert_failed() -> ! {
+            panic!("exceeded maximum capacity of the vector");
+        }
+
         if index > MAX_INDEX {
-            panic!("index out of bounds");
+            assert_failed();
         }
 
         Location::of_raw(index + ZERO_ENTRY)
