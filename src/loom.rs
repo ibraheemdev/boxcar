@@ -19,6 +19,16 @@ mod inner {
         }
     }
 
+    impl super::AtomicMut<usize> for atomic::AtomicUsize {
+        fn read_mut(&mut self) -> usize {
+            self.load(atomic::Ordering::Relaxed)
+        }
+
+        fn write_mut(&mut self, value: usize) {
+            self.store(value, atomic::Ordering::Relaxed)
+        }
+    }
+
     impl<T> super::AtomicMut<*mut T> for atomic::AtomicPtr<T> {
         fn read_mut(&mut self) -> *mut T {
             self.load(atomic::Ordering::Relaxed)
@@ -46,6 +56,18 @@ mod inner {
         }
     }
 
+    impl super::AtomicMut<usize> for atomic::AtomicUsize {
+        #[inline(always)]
+        fn read_mut(&mut self) -> usize {
+            *self.get_mut()
+        }
+
+        #[inline(always)]
+        fn write_mut(&mut self, value: usize) {
+            *self.get_mut() = value;
+        }
+    }
+
     impl<T> super::AtomicMut<*mut T> for atomic::AtomicPtr<T> {
         #[inline(always)]
         fn read_mut(&mut self) -> *mut T {
@@ -62,6 +84,16 @@ mod inner {
         pub struct UnsafeCell<T>(core::cell::UnsafeCell<T>);
 
         impl<T> UnsafeCell<T> {
+            #[inline(always)]
+            pub fn new(val: T) -> Self {
+                Self(core::cell::UnsafeCell::new(val))
+            }
+
+            #[inline(always)]
+            pub fn into_inner(self) -> T {
+                self.0.into_inner()
+            }
+
             #[inline(always)]
             pub fn with<F, R>(&self, f: F) -> R
             where
