@@ -14,7 +14,7 @@ mod inner {
     pub use loom::{cell, sync::atomic};
 
     impl super::AtomicMut<bool> for atomic::AtomicBool {
-        fn unsync_load(&self) -> bool {
+        unsafe fn unsync_load(&self) -> bool {
             unsafe { self.unsync_load() }
         }
 
@@ -24,7 +24,7 @@ mod inner {
     }
 
     impl super::AtomicMut<u32> for atomic::AtomicU32 {
-        fn unsync_load(&self) -> u32 {
+        unsafe fn unsync_load(&self) -> u32 {
             unsafe { self.unsync_load() }
         }
 
@@ -34,7 +34,7 @@ mod inner {
     }
 
     impl super::AtomicMut<usize> for atomic::AtomicUsize {
-        fn unsync_load(&self) -> usize {
+        unsafe fn unsync_load(&self) -> usize {
             unsafe { self.unsync_load() }
         }
 
@@ -44,7 +44,7 @@ mod inner {
     }
 
     impl<T> super::AtomicMut<*mut T> for atomic::AtomicPtr<T> {
-        fn unsync_load(&self) -> *mut T {
+        unsafe fn unsync_load(&self) -> *mut T {
             unsafe { self.unsync_load() }
         }
 

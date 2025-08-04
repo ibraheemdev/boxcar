@@ -780,7 +780,7 @@ impl<K: Key, V> SlotMap<K, V> {
     /// assert_eq!(map.values().copied().collect::<Vec<_>>(), [25, 13]);
     /// ```
     pub fn retain(&mut self, mut f: impl FnMut(K, &mut V) -> bool) {
-        for (index, entry) in self.buckets.iter_mut().take(self.meta.len.read_mut() as usize) {
+        for (index, entry) in self.buckets.iter_mut() {
             if let Some((key, value)) = entry.get_mut(index) {
                 if !f(K::from(key), value) {
                     // Safety: We just checked that `entry` exists and is initialized.
