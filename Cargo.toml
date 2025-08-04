@@ -7,7 +7,7 @@ license = "MIT"
 rust-version = "1.72.0"
 
 readme = "README.md"
-description = "A concurrent, append-only vector"
+description = "A concurrent, append-only vector and slot map"
 repository = "https://github.com/ibraheemdev/boxcar"
 
 categories = ["concurrency", "data-structures"]
@@ -22,6 +22,7 @@ name = "bench"
 harness = false
 
 [dependencies]
+serde = { version = "1.0.219", optional = true }
 
 [target.'cfg(loom)'.dependencies]
 loom = { version = "0.7", optional = true }
@@ -31,3 +32,4 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [dev-dependencies]
 criterion = "0.5"
+serde_json = "1.0.140"

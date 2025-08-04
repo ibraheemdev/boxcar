@@ -19,3 +19,6 @@ pub use vec::Vec;
 // Reexports for backward compatibility.
 pub use vec::IntoIter;
 pub use vec::Iter;
+
+pub mod slotmap;
+pub use slotmap::SlotMap;

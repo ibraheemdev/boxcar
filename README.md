@@ -4,11 +4,14 @@
 [<img alt="github" src="https://img.shields.io/badge/github-boxcar-blue?style=for-the-badge" height="25">](https://github.com/ibraheemdev/boxcar)
 [<img alt="docs.rs" src="https://img.shields.io/docsrs/boxcar?style=for-the-badge" height="25">](https://docs.rs/boxcar)
 
-A concurrent, append-only vector.
+A concurrent, append-only vector and slot map.
 
-The vector provided by this crate supports lock-free `get` and `push` operations.
-The vector grows internally but never reallocates, so element addresses are stable
-for the lifetime of the vector. Additionally, both `get` and `push` run in constant-time.
+The vector provided by this crate supports lock-free `get` and `push` operations,
+and the slot map supports lock-free `get` and `insert`s. They grow internally but
+never reallocate, so element addresses are stable for their lifetime.
+Additionally, both `get`, `push` and `insert` run in constant-time.
+
+We also expose a low-level `Buckets` primitive for building your own similar collections.
 
 ## Examples
 
@@ -58,3 +61,8 @@ std::thread::scope(|s| {
 let x = vec[0].lock().unwrap();
 assert_eq!(*x, 1);
 ```
+
+
+## Feature flags
+
+The `serde` feature flag implements `Serialize` and `Deserialize` for the slot map and key types.
