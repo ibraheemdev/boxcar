@@ -24,3 +24,6 @@ pub use vec::Vec;
 pub use vec::IntoIter;
 #[doc(hidden)]
 pub use vec::Iter;
+
+pub mod slotmap;
+pub use slotmap::SlotMap;
