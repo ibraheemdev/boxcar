@@ -282,8 +282,16 @@ impl<T> Index<usize> for Vec<T> {
 
     #[inline]
     fn index(&self, index: usize) -> &Self::Output {
-        self.get(index)
-            .unwrap_or_else(|| panic!("index `{index}` is uninitialized"))
+        #[cold]
+        #[inline(never)]
+        fn assert_failed(index: usize) -> ! {
+            panic!("index {index} is uninitialized");
+        }
+
+        match self.get(index) {
+            Some(value) => value,
+            None => assert_failed(index),
+        }
     }
 }
 
