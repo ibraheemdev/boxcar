@@ -314,33 +314,44 @@ impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
 
         // If we are close to the end of this bucket, we eagerly allocate the next one to reduce
         // later contention.
-        if location.entry == location.bucket_len.get() / 8 * 7 {
-            if let Some(new_index) = index.after_bucket().advance() {
-                allocate_race(self.bucket(new_index), new_index.len());
-            }
-        }
-
-        if let Some(item) = self.get(index) {
-            return item;
+        if location.entry == (location.bucket_len.get() - (location.bucket_len.get() >> 3)) {
+            self.alloc_bucket_after(index);
         }
 
         let bucket = self.bucket(location.bucket);
 
-        // Panics: Let `i` be `index.get()`. To avoid panics, the condition is:
-        //
-        //   location.bucket_len * size_of::<T>() < isize::MAX + 1
-        // ⇔ 2 ^ floor(log2(i + SKIPPED_ENTRIES + 1)) < (isize::MAX + 1) / size_of::<T>()
-        // ⇔ i + SKIPPED_ENTRIES + 1 < ((isize::MAX + 1) / size_of::<T>()).next_power_of_two()
-        // ⇔ i < ((isize::MAX + 1) / size_of::<T>()).next_power_of_two() - SKIPPED_ENTRIES - 1
-        //
-        // Since `SKIPPED_ENTRIES` is an implementation detail, the caller can't enforce this.
-        // But the formula may be useful anyway.
-        let ptr = allocate_race_and_get(bucket, location.bucket_len);
+        // Acquire is necessary because we access the bucket afterward.
+        let mut ptr = bucket.load(atomic::Ordering::Acquire) as *const T;
+        if ptr.is_null() {
+            // Panics: Let `i` be `index.get()`. To avoid panics, the condition is:
+            //
+            //   location.bucket_len * size_of::<T>() < isize::MAX + 1
+            // ⇔ 2 ^ floor(log2(i + SKIPPED_ENTRIES + 1)) < (isize::MAX + 1) / size_of::<T>()
+            // ⇔ i + SKIPPED_ENTRIES + 1 < ((isize::MAX + 1) / size_of::<T>()).next_power_of_two()
+            // ⇔ i < ((isize::MAX + 1) / size_of::<T>()).next_power_of_two() - SKIPPED_ENTRIES - 1
+            //
+            // Since `SKIPPED_ENTRIES` is an implementation detail, the caller can't enforce this.
+            // But the formula may be useful anyway.
+            ptr = allocate_race_and_get(bucket, location.bucket_len);
+        }
 
         // Safety:
+        // - The pointer is non-null.
         // - By our invariants, the index is in bounds.
         // - We loaded the bucket pointer with `Acquire`, allowing us to access the allocation.
         unsafe { &*ptr.add(location.entry) }
+    }
+
+    /// Eagerly allocate the bucket after the bucket containing the provided index.
+    #[cold]
+    #[inline(never)]
+    fn alloc_bucket_after(&self, index: Index<BUCKETS>)
+    where
+        T: MaybeZeroable,
+    {
+        if let Some(new_index) = index.after_bucket().advance() {
+            allocate_race(self.bucket(new_index), new_index.len());
+        }
     }
 
     /// Retrieve a unique reference to the value at the specified index, or allocate the bucket if
@@ -522,8 +533,6 @@ fn allocate_race_and_get<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZeroUs
 /// # Panics
 ///
 /// `len * size_of::<T>()` must not overflow an `isize`.
-#[cold]
-#[inline(never)]
 fn allocate_race<T: MaybeZeroable>(bucket: &AtomicPtr<T>, len: NonZeroUsize) {
     // Panics: Ensured by caller.
     let ptr = Box::into_raw(allocate_slice::<T>(len));

@@ -35,6 +35,7 @@ impl<T> Vec<T> {
         let Some(zero) = <buckets::Index<BUCKETS>>::new(0) else {
             unreachable!();
         };
+
         Vec {
             inflight: AtomicUsize::new(zero.into_raw().get()),
             buckets: Buckets::new(),
@@ -145,14 +146,20 @@ impl<T> Vec<T> {
 
         // Safety: We cannot overflow.
         let Some(index) = (unsafe { buckets::Index::from_raw_checked_above(index) }) else {
-            // We could alternatively abort here, as `Arc` does. But we decrement and panic instead
-            // to keep in line with `Vec`'s behavior. Assuming that `isize::MAX` concurrent threads
-            // don't call this method, it is still impossible for it to overflow.
-            self.inflight.fetch_sub(1, Ordering::Relaxed);
-            panic!("capacity overflow");
+            self.next_index_overflow();
         };
 
         index
+    }
+
+    #[cold]
+    #[inline(never)]
+    fn next_index_overflow(&self) -> ! {
+        // We could alternatively abort here, as `Arc` does. But we decrement and panic instead
+        // to keep in line with `Vec`'s behavior. Assuming that `isize::MAX` concurrent threads
+        // don't call this method, it is still impossible for it to overflow.
+        self.inflight.fetch_sub(1, Ordering::Relaxed);
+        panic!("capacity overflow");
     }
 
     /// Appends the element returned from the closure to the back of the vector
