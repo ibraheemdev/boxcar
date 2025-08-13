@@ -92,83 +92,6 @@ impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
         Some(unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(ptr, i.len().get())) })
     }
 
-    /// Reserve capacity for [`.get_or_alloc(n)`](Self::get_or_alloc) to not allocate. Additionally,
-    /// attempt to allocate prior buckets.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use boxcar::buckets::{self, Buckets};
-    /// let buckets = <Buckets<u8, 5>>::new();
-    /// let index = buckets::Index::new(20).unwrap();
-    /// assert_eq!(buckets.get(index), None);
-    ///
-    /// buckets.reserve(index);
-    /// assert_eq!(*buckets.get(index).unwrap(), 0);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// May panic if `index` is too large or allocation fails.
-    pub fn reserve(&self, n: Index<BUCKETS>)
-    where
-        T: MaybeZeroable,
-    {
-        // Start at the current bucket and work our way backwards.
-        let mut cursor = n.after_bucket();
-        while let Some(index) = cursor.retreat() {
-            let bucket = self.bucket(index);
-
-            // If the bucket is allocated, we're done. It's technically possible that a later
-            // bucket got allocated but all the threads racing to allocate the earlier bucket
-            // died, or no such threads existed. This case is rare, and quitting early anyway is
-            // benign.
-            //
-            // Since we only check if the bucket exists and don't access its data, `Relaxed` is
-            // sufficient.
-            if !bucket.load(atomic::Ordering::Relaxed).is_null() {
-                break;
-            }
-
-            // Otherwise, race to allocate the bucket.
-            allocate_race(bucket, index.len());
-        }
-    }
-
-    /// Like [`reserve`](Self::reserve), but takes `&mut`. This can avoid synchronization sometimes.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use boxcar::buckets::{self, Buckets};
-    /// let mut buckets = <Buckets<u8, 5>>::new();
-    /// let index = buckets::Index::new(20).unwrap();
-    ///
-    /// buckets.reserve_mut(index);
-    /// assert_eq!(*buckets.get(index).unwrap(), 0);
-    /// ```
-    ///
-    /// # Panics
-    ///
-    /// May panic if `index` is too large or allocation fails.
-    pub fn reserve_mut(&mut self, n: Index<BUCKETS>)
-    where
-        T: MaybeZeroable,
-    {
-        // The same algorithm as in `reserve`.
-        let mut cursor = n.after_bucket();
-        while let Some(index) = cursor.retreat() {
-            let bucket = self.bucket_mut(index);
-
-            if !bucket.read_mut().is_null() {
-                break;
-            }
-
-            let ptr = Box::into_raw(allocate_slice::<T>(index.len()));
-            bucket.write_mut(ptr.cast::<T>());
-        }
-    }
-
     /// Retrieve the value at the specified index, or `None` if it has not been allocated yet.
     ///
     /// # Examples
@@ -244,9 +167,9 @@ impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
         let location = index.location();
         let bucket = self.bucket(location.bucket);
 
-        // We only need `Relaxed`, because the caller guarantees that the bucket is already
-        // allocated. In theory, we could get away with an unsynchronized read here, but it's an
-        // open question whether unsynchronized reads race with failing RMWs:
+        // We only need `Relaxed`, because the caller guarantees that the bucket is already allocated.
+        // In theory, we could get away with an unsynchronized read here, but there's an open question
+        // as to whether or not unsynchronized reads race with failing RMWs:
         // https://github.com/rust-lang/unsafe-code-guidelines/issues/355
         let ptr = bucket.load(atomic::Ordering::Relaxed);
 
@@ -394,8 +317,92 @@ impl<T, const BUCKETS: usize> Buckets<T, BUCKETS> {
         unsafe { &mut *ptr.add(location.entry) }
     }
 
-    /// Truncate the `Buckets` to the smallest capacity that does not need to allocate to access
-    /// any item before `n`.
+    /// Reserve capacity up to and including the provided index.
+    ///
+    /// After calling this method, [`.get_or_alloc(n)`](Self::get_or_alloc) is guaranteed not to
+    /// allocate.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use boxcar::buckets::{self, Buckets};
+    /// let buckets = <Buckets<u8, 5>>::new();
+    /// let index = buckets::Index::new(20).unwrap();
+    /// assert_eq!(buckets.get(index), None);
+    ///
+    /// buckets.reserve(index);
+    /// assert_eq!(*buckets.get(index).unwrap(), 0);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// May panic if `index` is too large or allocation fails.
+    pub fn reserve(&self, index: Index<BUCKETS>)
+    where
+        T: MaybeZeroable,
+    {
+        // Start at the current bucket and work our way backwards.
+        let mut cursor = index.after_bucket();
+        while let Some(index) = cursor.retreat() {
+            let bucket = self.bucket(index);
+
+            // If the bucket is allocated, we're done. It's technically possible that a later
+            // bucket got allocated but all the threads racing to allocate the earlier bucket
+            // died, or no such threads existed. This case is rare, and quitting early anyway is
+            // benign.
+            //
+            // Since we only check if the bucket exists and don't access its data, `Relaxed` is
+            // sufficient.
+            if !bucket.load(atomic::Ordering::Relaxed).is_null() {
+                break;
+            }
+
+            // Otherwise, race to allocate the bucket.
+            allocate_race(bucket, index.len());
+        }
+    }
+
+    /// Reserve capacity up to and including the provided index.
+    ///
+    /// Unlike [`reserve`](Self::reserve), this method takes a mutable reference to the `Buckets`,
+    /// avoiding synchronization.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use boxcar::buckets::{self, Buckets};
+    /// let mut buckets = <Buckets<u8, 5>>::new();
+    /// let index = buckets::Index::new(20).unwrap();
+    ///
+    /// buckets.reserve_mut(index);
+    /// assert_eq!(*buckets.get(index).unwrap(), 0);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// May panic if `index` is too large or allocation fails.
+    pub fn reserve_mut(&mut self, index: Index<BUCKETS>)
+    where
+        T: MaybeZeroable,
+    {
+        // The same algorithm as in `reserve`.
+        let mut cursor = index.after_bucket();
+        while let Some(index) = cursor.retreat() {
+            let bucket = self.bucket_mut(index);
+
+            if !bucket.read_mut().is_null() {
+                break;
+            }
+
+            let ptr = Box::into_raw(allocate_slice::<T>(index.len()));
+            bucket.write_mut(ptr.cast::<T>());
+        }
+    }
+
+    /// Truncate the `Buckets`, keeping at least the first `n` elements.
+    ///
+    /// This method truncates to the smallest capacity that preserves any items before
+    /// `n`, but may include subsequent elements due to the bucket layout.
     ///
     /// # Examples
     ///
@@ -475,15 +482,15 @@ impl<T: Debug, const BUCKETS: usize> Debug for Buckets<T, BUCKETS> {
 /// Types with a [`Default`] implementation that may or may not additionally support safe
 /// initialization with all zero bytes.
 ///
-/// We don't provide implementations of this trait beyond what is used in examples, because it is
-/// expected that you will be implementing it for your own types anyway.
+/// The provided implementations of this trait are only for example purposes, as it is
+/// expected to be implemented manually for user-defined types.
 ///
 /// # Safety
 ///
 /// If [`zeroable`](Self::zeroable) returns true, the all-zeros bit pattern must be a valid instance
 /// of this type.
 pub unsafe trait MaybeZeroable: Default {
-    /// Query whether the all-zeros bit pattern is a valid instance of the type.
+    /// Returns `true` if the all-zeros bit pattern is a valid instance of the type.
     fn zeroable() -> bool;
 }
 
@@ -492,6 +499,7 @@ unsafe impl MaybeZeroable for u8 {
         true
     }
 }
+
 unsafe impl MaybeZeroable for u16 {
     fn zeroable() -> bool {
         true
@@ -621,11 +629,9 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
 
     /// Construct a new `Index`.
     ///
-    /// Returns `None` if the index is out of bounds. All indices up to a certain unspecified point
-    /// are in bounds.
-    ///
-    /// If [`buckets_for_index_bits`] is used, this function is guaranteed to reject values greater
-    /// than `2 ^ bits`, but may also reject smaller values.
+    /// Returns `None` if the index is out of bounds. Note that [`buckets_for_index_bits`] can be used to guarantee
+    /// that this function returns `None` for any values greater than `2 ^ bits`, but it may also do so for smaller
+    /// values.
     pub const fn new(i: usize) -> Option<Self> {
         if i < Self::ENTRIES {
             // Safety: What we just checked.
@@ -639,7 +645,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
     ///
     /// # Safety
     ///
-    /// `Self::new(i)` must return `Some`.
+    /// `Index::new(i)` must return `Some`.
     pub const unsafe fn new_unchecked(i: usize) -> Self {
         // Safety: Ensured by the caller.
         // We use this to elide bounds checks below.
@@ -672,7 +678,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         Self::new(cmp::min(i, Self::ENTRIES - 1)).unwrap()
     }
 
-    /// Get the index passed into [`Self::new`].
+    /// Get the index passed into [`Index::new`].
     pub const fn get(self) -> usize {
         self.inner.get() - (SKIPPED_ENTRIES + 1)
     }
@@ -696,7 +702,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
     ///
     /// # Safety
     ///
-    /// The given index must be at an in-bounds offset from an index previously returned from
+    /// The given index must be at an in-bounds offset from an index previously returned by
     /// [`into_raw`](Self::into_raw).
     pub const unsafe fn from_raw_unchecked(inner: usize) -> Self {
         debug_assert!(SKIPPED_ENTRIES < inner);
@@ -712,8 +718,8 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
     ///
     /// # Safety
     ///
-    /// The given index must be at a positive, but not necessarily in-bounds, offset from an index
-    /// previously returned from [`into_raw`](Self::into_raw).
+    /// The given index must be at a positive offset from an index previously returned by
+    /// [`into_raw`](Self::into_raw).
     pub const unsafe fn from_raw_checked_above(inner: usize) -> Option<Self> {
         if inner <= Self::ENTRIES_WITH_SKIPPED {
             // Safety: The lower bound is ensured by the caller, and we just checked the upper one.
@@ -808,7 +814,7 @@ impl<const BUCKETS: usize> Index<BUCKETS> {
         }
     }
 
-    /// Query whether this index is the first in its bucket.
+    /// Returns `true` if this index is the first in its bucket.
     pub fn is_first_in_bucket(self) -> bool {
         self.location().entry == 0
     }
@@ -979,6 +985,7 @@ impl<const BUCKETS: usize> BucketCursor<BUCKETS> {
 impl<'a, T, const BUCKETS: usize> IntoIterator for &'a Buckets<T, BUCKETS> {
     type Item = (Index<BUCKETS>, &'a T);
     type IntoIter = Iter<'a, T, BUCKETS>;
+
     fn into_iter(self) -> Self::IntoIter {
         Iter {
             buckets: self,
@@ -1001,6 +1008,7 @@ pub struct Iter<'a, T, const BUCKETS: usize> {
 
 impl<'a, T, const BUCKETS: usize> Iterator for Iter<'a, T, BUCKETS> {
     type Item = (Index<BUCKETS>, &'a T);
+
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // If we have more elements in the current bucket, yield them first.
@@ -1047,6 +1055,7 @@ impl<T, const BUCKETS: usize> Clone for Iter<'_, T, BUCKETS> {
 impl<'a, T, const BUCKETS: usize> IntoIterator for &'a mut Buckets<T, BUCKETS> {
     type Item = (Index<BUCKETS>, &'a mut T);
     type IntoIter = IterMut<'a, T, BUCKETS>;
+
     fn into_iter(self) -> Self::IntoIter {
         IterMut {
             buckets: self,
@@ -1069,6 +1078,7 @@ pub struct IterMut<'a, T, const BUCKETS: usize> {
 
 impl<'a, T, const BUCKETS: usize> Iterator for IterMut<'a, T, BUCKETS> {
     type Item = (Index<BUCKETS>, &'a mut T);
+
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // If we have more elements in the current bucket, yield them first.
@@ -1103,6 +1113,7 @@ impl<T, const BUCKETS: usize> FusedIterator for IterMut<'_, T, BUCKETS> {}
 impl<T, const BUCKETS: usize> IntoIterator for Buckets<T, BUCKETS> {
     type Item = (Index<BUCKETS>, T);
     type IntoIter = IntoIter<T, BUCKETS>;
+
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
             buckets: self,
@@ -1125,6 +1136,7 @@ pub struct IntoIter<T, const BUCKETS: usize> {
 
 impl<T, const BUCKETS: usize> Iterator for IntoIter<T, BUCKETS> {
     type Item = (Index<BUCKETS>, T);
+
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // If we have more elements in the current bucket, yield them first.
