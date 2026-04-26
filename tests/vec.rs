@@ -153,3 +153,61 @@ fn stress() {
     sorted.sort();
     assert_eq!(sorted, (0..4000).collect::<Vec<_>>());
 }
+
+#[test]
+fn stress_many() {
+    let vec = boxcar::Vec::new();
+    let barrier = Barrier::new(6);
+
+    thread::scope(|s| {
+        s.spawn(|| {
+            barrier.wait();
+            for _ in 0..1000 {
+                vec.push_many(2, |i| i);
+            }
+        });
+
+        s.spawn(|| {
+            barrier.wait();
+            for _ in 0..1000 {
+                vec.push_many(2, |i| i);
+            }
+        });
+
+        s.spawn(|| {
+            barrier.wait();
+            for _ in 0..1000 {
+                vec.push_many(2, |i| i);
+            }
+        });
+
+        s.spawn(|| {
+            barrier.wait();
+            for _ in 0..1000 {
+                vec.push_many(2, |i| i);
+            }
+        });
+
+        s.spawn(|| {
+            barrier.wait();
+            for i in 0..10_000 {
+                if let Some(&x) = vec.get(i) {
+                    assert!(x < 8000);
+                }
+            }
+        });
+
+        s.spawn(|| {
+            barrier.wait();
+            for (i, &x) in vec.iter() {
+                assert!(x < 8000);
+                assert!(vec[i] < 8000);
+            }
+        });
+    });
+
+    assert_eq!(vec.count(), 8000);
+    let mut sorted = vec.into_iter().collect::<Vec<_>>();
+    sorted.sort();
+    assert_eq!(sorted, (0..8000).collect::<Vec<_>>());
+}

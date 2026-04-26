@@ -162,29 +162,76 @@ impl<T> Vec<T> {
         panic!("capacity overflow");
     }
 
+    /// Appends an element to the back of the vector.
+    #[inline]
+    pub fn push(&self, value: T) -> usize {
+        // Safety: `next_index` is always in-bounds and unique.
+        unsafe { self.write(self.next_index(), value) }
+    }
+
     /// Appends the element returned from the closure to the back of the vector
     /// at the index represented by the `usize` passed to closure.
     ///
     /// This allows for use of the would-be index to be utilized within the
     /// element.
     #[inline]
-    pub fn push_with<F>(&self, f: F) -> usize
+    pub fn push_with<F>(&self, create: F) -> usize
     where
         F: FnOnce(usize) -> T,
     {
         // Acquire a unique index to insert into.
         let index = self.next_index();
-        let value = f(index.get());
+        let value = create(index.get());
 
         // Safety: `next_index` is always in-bounds and unique.
         unsafe { self.write(index, value) }
     }
 
-    /// Appends an element to the back of the vector.
+    /// Appends `count` elements to the back of the vector, initializing each
+    /// element with the closure called with the index of the given element.
+    ///
+    /// The indices passed to the closure are guaranteed to be contiguous and in
+    /// sequential order. The first index that is created is returned by this
+    /// function.
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if `count` is 0.
     #[inline]
-    pub fn push(&self, value: T) -> usize {
-        // Safety: `next_index` is always in-bounds and unique.
-        unsafe { self.write(self.next_index(), value) }
+    pub fn push_many<F>(&self, count: usize, mut create: F) -> usize
+    where
+        F: FnMut(usize) -> T,
+    {
+        assert!(count > 0, "cannot call `push_many` with a count of 0");
+
+        let index = self
+            .inflight
+            // Note that the `Relaxed` ordering here is sufficient, as we only care about
+            // the index being unique and do not use it for synchronization.
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |index| {
+                // Ensure the next index does not overflow.
+                let next_index = index.checked_add(count)?;
+
+                // Ensure that the final index we are creating is in-bounds.
+                //
+                // Safety: We checked above that we did not overflow.
+                unsafe { buckets::Index::<BUCKETS>::from_raw_checked_above(next_index - 1) }?;
+
+                Some(next_index)
+            })
+            .expect("capacity overflow");
+
+        for index in index..index + count {
+            // Safety: Indices are contiguous, and we ensured the maximum index is in-bounds.
+            let index = unsafe { buckets::Index::<BUCKETS>::from_raw_unchecked(index) };
+            let value = create(index.get());
+
+            // Safety: We uniquely claimed every index from `index..index + count`.
+            unsafe { self.write(index, value) };
+        }
+
+        // Safety: We ensured the maximum index is in-bounds.
+        unsafe { buckets::Index::<BUCKETS>::from_raw_unchecked(index) }.get()
     }
 
     /// Write an element at the given index.
