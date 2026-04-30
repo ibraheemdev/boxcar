@@ -100,3 +100,27 @@ fn mixed() {
         assert_eq!(values, (0..2).collect::<Vec<_>>());
     });
 }
+
+#[test]
+fn write_many() {
+    loom::model(|| {
+        let vec = Arc::new(boxcar::Vec::new());
+        let v1 = vec.clone();
+        let v2 = vec.clone();
+
+        let t1 = thread::spawn(move || v1.push_many(3, |_| 1));
+        let t2 = thread::spawn(move || v2.push_many(2, |_| 2));
+
+        let i1 = t1.join().unwrap();
+        let i2 = t2.join().unwrap();
+
+        assert_eq!(vec[i1], 1);
+        assert_eq!(vec[i1 + 1], 1);
+        assert_eq!(vec[i1 + 2], 1);
+        assert_eq!(vec[i2], 2);
+        assert_eq!(vec[i2 + 1], 2);
+        assert_eq!(vec.count(), 5);
+    });
+}
+
+

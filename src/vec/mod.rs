@@ -164,11 +164,66 @@ impl<T> Vec<T> {
     /// assert_eq!(vec, [0, 1, 2]);
     /// ```
     #[inline]
-    pub fn push_with<F>(&self, f: F) -> usize
+    pub fn push_with<F>(&self, create: F) -> usize
     where
         F: FnOnce(usize) -> T,
     {
-        self.raw.push_with(f)
+        self.raw.push_with(create)
+    }
+
+    /// Appends `count` elements to the back of the vector, initializing each
+    /// element with the closure called with the index of the given element.
+    ///
+    /// The indices passed to the closure are guaranteed to be contiguous and in
+    /// sequential order, and the first created index is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec = boxcar::vec![0, 1];
+    /// let i = vec.push_many(3, |index| index);
+    /// assert_eq!(i, 2);
+    /// assert_eq!(vec, [0, 1, 2, 3, 4]);
+    /// ```
+    ///
+    /// # Panics
+    ///
+    /// This method will panic if `count` is 0.
+    #[inline]
+    pub fn push_many<F>(&self, count: usize, create: F) -> usize
+    where
+        F: FnMut(usize) -> T,
+    {
+        self.raw.push_many(count, create)
+    }
+
+    /// Clones and appends all elements in a slice to the `Vec`.
+    ///
+    /// Iterates over the slice `other`, clones each element, and then appends it
+    /// to this `Vec`. The `other` slice is guaranteed to be appended contiguously
+    /// and in sequential order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let vec = boxcar::vec![1];
+    /// vec.extend_from_slice(&[2, 3, 4]);
+    /// assert_eq!(vec, [1, 2, 3, 4]);
+    /// ```
+    #[inline]
+    pub fn extend_from_slice(&self, other: &[T])
+    where
+        T: Clone,
+    {
+        if other.is_empty() {
+            return;
+        }
+
+        let mut iter = other.iter();
+        self.push_many(other.len(), |_| unsafe {
+            // Safety: We push exactly `other.len()` elements.
+            iter.next().unwrap_unchecked().clone()
+        });
     }
 
     /// Returns the number of elements in the vector.
